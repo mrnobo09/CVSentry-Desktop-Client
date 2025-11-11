@@ -2,7 +2,7 @@ import gi
 import asyncio
 
 gi.require_version('Gst', '1.0')
-from gi.repository import Gst, GstApp  # Add GstApp
+from gi.repository import Gst
 
 Gst.init(None)
 
@@ -27,9 +27,11 @@ class GstHandler:
         async with self.lock:
             if camera_id not in self.pipelines:
                 raise ValueError(f"No pipeline found for camera_id {camera_id}.")
+            
             pipeline = self.pipelines[camera_id]
             pipeline.set_state(Gst.State.NULL)
             del self.pipelines[camera_id]
+            
 
     def get_appsink(self,camera_id:str):
         if camera_id not in self.pipelines:

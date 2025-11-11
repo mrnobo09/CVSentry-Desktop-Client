@@ -18,7 +18,7 @@ from gsthandler import GstHandler
 async def main():
     gst_manager = GstHandler()
     camera_id = "cam1"
-    rtsp_url = "rtsp://192.168.100.78:8080/h264_ulaw.sdp"
+    rtsp_url = "rtsp://192.168.100.82:8080/h264_aac.sdp"
 
     try:
         await gst_manager.start_pipeline(camera_id, rtsp_url)
