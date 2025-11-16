@@ -9,7 +9,7 @@ class RedisManager:
     MAX_FRAMES_PER_CYCLE = 100000
 
     def __init__(self):
-        self.client = Optional[redis.Redis] = None
+        self.client : Optional[redis.Redis] = None
 
     def get_client(self) -> redis.Redis:
         if self.client is None:
@@ -43,6 +43,7 @@ class RedisManager:
         frame_id = self.get_frame_id(camera_id)
         
         stream_key = f'stream:{camera_id}'
+        print(f"Streaming frame {frame_id} to {stream_key}")
 
         r.xadd(
             stream_key,

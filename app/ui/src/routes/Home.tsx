@@ -18,7 +18,7 @@ export default function Home() {
 
     const fetchCameras = async () => {
       try {
-        const response = await axios.get<Cameras>(`http://127.0.0.1:8000/cameras/list`);
+        const response = await axios.get<Cameras>(`http://127.0.0.1:4100/cameras/list`);
         setAllCameras(Object.values(response.data));
       } catch(error) {
         alert("Error fetching cameras from API. Please ensure the backend server is running.");
