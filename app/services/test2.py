@@ -20,9 +20,9 @@ async def test_analyzer_with_real_camera():
     test_cameras = Cameras(
         root={
             "cam_1": Camera(
-                ip_address="192.168.100.86",
-                onvif_url="http://192.168.100.86:8080/onvif/device_service",
-                rtsp_url="rtsp://192.168.100.86:8080/h264_ulaw.sdp"
+                ip_address="192.168.40.2",
+                onvif_url="http://192.168.40.2:8080/onvif/device_service",
+                rtsp_url="rtsp://192.168.40.2:8080/h264_ulaw.sdp"
             )
         }
     )
@@ -41,7 +41,7 @@ async def test_analyzer_with_real_camera():
         await AnalyzeCameraStreams(test_cameras)
         
         # Let it run for a specified duration
-        test_duration = 30  # seconds
+        test_duration = 120  # seconds
         print(f"⏱️  Running for {test_duration} seconds...\n")
         print("Monitor Redis in another terminal with:")
         print("  redis-cli")

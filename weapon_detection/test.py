@@ -3,6 +3,11 @@ import numpy as np
 import redis
 import threading
 import queue
+import asyncio
+
+from services.analysis import FrameAnalyzer
+
+analyzer = FrameAnalyzer(skip_frames=0)
 
 # -----------------------------
 # Configuration
@@ -54,7 +59,7 @@ def fetch_frames(camera_id):
 # -----------------------------
 # Main function
 # -----------------------------
-def main():
+async def main():
     # Start fetching threads
     for cam in CAMERAS:
         t = threading.Thread(target=fetch_frames, args=(cam,), daemon=True)
@@ -66,11 +71,15 @@ def main():
             for cam in CAMERAS:
                 if not frame_queues[cam].empty():
                     frame = frame_queues[cam].get()
-                    cv2.imshow(cam, frame)
+                    analyzed_frame, detections = await analyzer.analyze_frame(frame)
+                    if analyzed_frame is not None:
+                        cv2.imshow(cam, analyzed_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print("Exiting viewer...")
                 break
+
+            await asyncio.sleep(0.001)
 
     finally:
         cv2.destroyAllWindows()
@@ -80,4 +89,4 @@ def main():
 # Entry point
 # -----------------------------
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

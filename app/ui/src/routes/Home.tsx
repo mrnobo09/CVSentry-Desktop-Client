@@ -79,7 +79,7 @@ export default function Home() {
                 {' '}
                 {selectedCameras.length === 1 ? 'camera' : 'cameras'} selected
               </span>
-            </span>mport.meta.env.VITE_API_BASE_URL;
+            </span>
           </div>
           <button
             onClick={handleStartAnalysis}

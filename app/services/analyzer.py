@@ -1,14 +1,16 @@
 import asyncio
-from avhandler import AVHandler
+from services.avhandler import AVHandler
 from schemas.cameras import Cameras
 from utils.redis_manager import redis_manager as rdb
 
 
 async def AnalyzeCameraStreams(cameras:Cameras):
     """Analyze camera streams asynchronously."""
-    for camera_id, camera_info in cameras.root.items():
+    for camera_id, camera_info in cameras.items():
         rtsp_url = camera_info.rtsp_url
         #ip_address = camera_info.ip_address
+
+        print(f"Starting analysis for camera {camera_id} at {rtsp_url}")
 
         av_manager = AVHandler()
 
