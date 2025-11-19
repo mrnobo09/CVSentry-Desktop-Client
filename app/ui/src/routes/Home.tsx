@@ -1,27 +1,43 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import CameraInfo from '../components/CameraInfo';
-import type { Cameras, Camera } from '../types/CameraTypes';
-import { PlayCircle, Database } from 'lucide-react';
+import type { Cameras, Camera, CameraStream } from '../types/CameraTypes';
+import { PlayCircle, Database, Loader2 } from 'lucide-react';
+
+// Internal type for UI rendering (includes the ID key)
+interface CameraWithId extends Camera {
+  id: string;
+}
 
 export default function Home() {
-  // State for all cameras discovered or fetched
-  const [allCameras, setAllCameras] = useState<Camera[]>([]);
-  // State for *only* the selected camera IPs
-  const [selectedCameras, setSelectedCameras] = useState<string[]>([]);
-  // State to know if we are loading initial data
-  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
 
-  // On component mount: fetch cameras
+  // State holds the camera objects plus their ID for UI mapping
+  const [allCameras, setAllCameras] = useState<CameraWithId[]>([]);
+  
+  // State tracks selected cameras as a dictionary: { "cam_1": Camera, "cam_2": Camera }
+  const [selectedCameras, setSelectedCameras] = useState<Cameras>({});
+  
+  const [isLoading, setIsLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
+
+  // 1. Fetch Cameras
   useEffect(() => {
     setIsLoading(true);
 
     const fetchCameras = async () => {
       try {
         const response = await axios.get<Cameras>(`http://127.0.0.1:4100/cameras/list`);
-        setAllCameras(Object.values(response.data));
+        console.log(`Fetched cameras:`, JSON.stringify(response.data));
+        
+        const camerasArray = Object.entries(response.data).map(([key, data]) => ({
+          id: key,
+          ...data
+        }));
+        setAllCameras(camerasArray);
+        console.log(`Processed cameras array:`, JSON.stringify(camerasArray));
       } catch(error) {
-        alert("Error fetching cameras from API. Please ensure the backend server is running.");
         console.error("Error fetching cameras:", error);
       } finally {
         setIsLoading(false);
@@ -31,30 +47,63 @@ export default function Home() {
     fetchCameras();
   }, []);
 
-  // Handles toggling a camera's selection state
-  const handleCameraSelect = (cameraIp: string) => {
+  const handleCameraSelect = (cameraId: string) => {
     setSelectedCameras((prevSelected) => {
-      if (prevSelected.includes(cameraIp)) {
-        // If already selected, remove it
-        return prevSelected.filter((ip) => ip !== cameraIp);
+      // If already selected, remove it
+      if (prevSelected[cameraId]) {
+        const { [cameraId]: _removed, ...rest } = prevSelected;
+        return rest;
       } else {
-        // If not selected, add it
-        return [...prevSelected, cameraIp];
+        // Add the camera to selected
+        const cameraObj = allCameras.find((c) => c.id === cameraId);
+        if (cameraObj) {
+          // Extract only the Camera properties (without id)
+          const { id: _ignoredId, ...cameraData } = cameraObj;
+          return {
+            ...prevSelected,
+            [cameraId]: cameraData
+          };
+        }
+        return prevSelected;
       }
     });
   };
 
-  // Handles the "Start Analyzing" button click
-  const handleStartAnalysis = () => {
-    console.log('Starting analysis on:', selectedCameras);
-    alert(`Starting analysis on ${selectedCameras.length} camera(s).`);
-    // You would navigate to a new page or open modals here
+  const handleStartAnalysis = async () => {
+    if (Object.keys(selectedCameras).length === 0) return;
+    
+    setIsStarting(true);
+
+    try {
+      // selectedCameras is already in the correct format: { "cam_1": Camera, "cam_2": Camera }
+      const payload = selectedCameras;
+
+      // Send POST request with the formatted payload
+      console.log("Sending payload:", JSON.stringify(payload, null, 2));
+      
+      await axios.post('http://127.0.0.1:4100/cameras/start', payload);
+
+      // Navigate to streams page passing the IDs using CameraStream type
+      const streamState: CameraStream = { 
+        cameraIds: Object.keys(selectedCameras) 
+      };
+      navigate('/streams', { state: streamState });
+
+    } catch (error) {
+      console.error("Failed to start analysis:", error);
+      alert("Failed to start analysis backend. Check console for details.");
+    } finally {
+      setIsStarting(false);
+    }
   };
+
+  const selectedCount = Object.keys(selectedCameras).length;
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-screen bg-gray-900 text-white">
-        Loading configuration...
+      <div className="flex flex-col justify-center items-center h-screen bg-gray-900 text-white gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <p>Scanning network for cameras...</p>
       </div>
     );
   }
@@ -69,44 +118,55 @@ export default function Home() {
           </p>
         </header>
 
-        {/* --- Control Panel --- */}
+        {/* Control Panel */}
         <div className="bg-gray-800 shadow-lg rounded-xl p-6 mb-8 flex flex-col sm:flex-row justify-between items-center gap-4 sticky top-4 z-10 border border-gray-700">
           <div className="flex items-center gap-3">
             <Database className="w-6 h-6 text-blue-400" />
             <span className="text-xl font-medium">
-              {selectedCameras.length}
+              {selectedCount}
               <span className="text-gray-400">
                 {' '}
-                {selectedCameras.length === 1 ? 'camera' : 'cameras'} selected
+                {selectedCount === 1 ? 'camera' : 'cameras'} selected
               </span>
             </span>
           </div>
+          
           <button
             onClick={handleStartAnalysis}
-            disabled={selectedCameras.length === 0}
-            className="flex items-center justify-center gap-2 w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            disabled={selectedCount === 0 || isStarting}
+            className={`flex items-center justify-center gap-2 w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition-all duration-200 
+              ${selectedCount === 0 || isStarting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:shadow-blue-900/30'}`}
           >
-            <PlayCircle className="w-5 h-5" />
-            Start Analyzing
+            {isStarting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Initializing...
+              </>
+            ) : (
+              <>
+                <PlayCircle className="w-5 h-5" />
+                Start Analyzing
+              </>
+            )}
           </button>
         </div>
 
-        {/* --- Camera Grid --- */}
+        {/* Camera Grid */}
         {allCameras.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {allCameras.map((camera) => (
               <CameraInfo
-                key={camera.ip_address}
+                key={camera.id} 
                 camera={camera}
-                isSelected={selectedCameras.includes(camera.ip_address)}
-                onSelect={() => handleCameraSelect(camera.ip_address)}
+                isSelected={camera.id in selectedCameras} 
+                onSelect={() => handleCameraSelect(camera.id)} 
               />
             ))}
           </div>
         ) : (
-          <div className="text-center text-gray-500 py-12">
-            <p className="text-lg">No cameras found.</p>
-            <p>Please check your network or API connection.</p>
+          <div className="text-center text-gray-500 py-12 border border-gray-800 rounded-xl bg-gray-800/30">
+            <p className="text-lg font-semibold mb-2">No ONVIF cameras found.</p>
+            <p className="text-sm">Please ensure your cameras are connected and support ONVIF discovery.</p>
           </div>
         )}
       </div>

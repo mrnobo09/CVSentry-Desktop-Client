@@ -1,12 +1,14 @@
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from wsdiscovery import WSDiscovery
 from wsdiscovery.qname import QName
-from onvif import ONVIFCamera # Assuming this is available
+from onvif import ONVIFCamera
 
-def get_rtsp_url(onvif_url, username, password):
+def get_rtsp_url(xaddr, username, password):
     """Fetch RTSP stream URL from ONVIF service endpoint."""
     try:
-        # Extract IP and Port from the ONVIF URL (e.g., http://192.168.1.10:80/onvif/device_service)
-        parts = onvif_url.split('/')
+        # Extract IP and Port from xaddr (ONVIF URL)
+        parts = xaddr.split('/')
         ip_port = parts[2]
         
         if ':' in ip_port:
@@ -14,14 +16,10 @@ def get_rtsp_url(onvif_url, username, password):
         else:
             ip, port = ip_port, 80 
         
-        # Instantiate the ONVIF Camera object
+        # Connect to Camera
         cam = ONVIFCamera(ip, int(port), username, password) 
-        
-        # Create media service proxy and fetch the stream URI
         media_service = cam.create_media_service()
         profiles = media_service.GetProfiles()
-        
-        # Use the first profile found
         token = profiles[0].token 
 
         stream_setup = {
@@ -31,69 +29,88 @@ def get_rtsp_url(onvif_url, username, password):
         uri = media_service.GetStreamUri(stream_setup)
         return uri.Uri
     except Exception as e:
-        print(f"Failed to get RTSP URL for {onvif_url}: {e}")
+        # print(f"Connection failed for {xaddr}: {e}")
         return None
 
-
-def discover_cameras(username="admin", password="admin", discovery_timeout=5):
+def discover_cameras(username="admin", password="admin", discovery_timeout=3, retries=3):
     """
-    Discovers ONVIF cameras and fetches their RTSP stream URLs.
-
-    Args:
-        username (str): Default username for the camera login.
-        password (str): Default password for the camera login.
-        discovery_timeout (int): Timeout in seconds for WS-Discovery search.
-
-    Returns:
-        dict: A dictionary of cameras, including IP, ONVIF URL, and RTSP URL.
+    Hybrid discovery: 
+    1. Re-creates WSDiscovery per retry (Fixes single camera detection).
+    2. Uses Threading for RTSP fetching (Fixes speed).
     """
     cameras = {}
+    unique_services = {} # Key: IP, Value: XAddr
     
-    try:
-        # 1. WS-Discovery Phase
-        onvif_type = QName(
-            "http://www.onvif.org/ver10/network/wsdl",
-            "NetworkVideoTransmitter"
-        )
-
-        wsd = WSDiscovery()
-        wsd.start()
-        # Use the provided timeout
-        services = wsd.searchServices(types=[onvif_type], timeout=discovery_timeout)
-        wsd.stop()
-
-        # 2. RTSP Fetching Phase
-        for i, service in enumerate(services):
-            xaddr = service.getXAddrs()[0]
-            ip_address = xaddr.split('/')[2].split(':')[0]
-            camera_id = f"cam_{i+1}"
+    onvif_type = QName("http://www.onvif.org/ver10/network/wsdl", "NetworkVideoTransmitter")
+    
+    # --- Phase 1: Reliable Discovery ---
+    # We create a NEW WSDiscovery instance each loop. 
+    # This ensures we don't have stale sockets or filtered results from previous runs.
+    for i in range(retries):
+        try:
+            wsd = WSDiscovery()
+            wsd.start()
             
-            # Fetch the RTSP URL using the helper function
-            rtsp_url = get_rtsp_url(xaddr, username, password)
+            # Scan for devices
+            services = wsd.searchServices(types=[onvif_type], timeout=discovery_timeout)
+            
+            for service in services:
+                xaddr = service.getXAddrs()[0]
+                ip = xaddr.split('/')[2].split(':')[0]
+                
+                if ip not in unique_services:
+                    unique_services[ip] = xaddr
+            
+            wsd.stop()
+            
+            # Optimization: If we found devices, we don't necessarily need to stop.
+            # But we continue retrying to find ANY missed devices (packet loss).
+            
+        except Exception as e:
+            print(f"Error during discovery attempt {i}: {e}")
 
-            cameras[camera_id] = {
-                "ip_address": ip_address,
-                "onvif_url": xaddr,
-                "rtsp_url": rtsp_url  # <-- RTSP URL is now part of the camera object
-            }
+    # --- Phase 2: Fast Parallel Login ---
+    camera_results = []
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ip = {
+            executor.submit(get_rtsp_url, xaddr, username, password): (ip, xaddr)
+            for ip, xaddr in unique_services.items()
+        }
 
-    except Exception as e:
-        print(f"Error during discovery: {e}")
+        for future in as_completed(future_to_ip):
+            ip, xaddr = future_to_ip[future]
+            rtsp_url = future.result()
+            
+            if rtsp_url:
+                camera_results.append({
+                    "ip_address": ip,
+                    "onvif_url": xaddr,
+                    "rtsp_url": rtsp_url
+                })
+
+    # --- Phase 3: Output Formatting ---
+    for i, cam_data in enumerate(camera_results):
+        camera_id = f"cam_{i+1}"
+        cameras[camera_id] = cam_data
 
     return cameras
 
-
-# Example usage for verification:
-# if __name__ == "__main__":
-#     # NOTE: Replace 'admin'/'admin' with your actual camera credentials
-#     cameras = discover_cameras(username="admin", password="admin") 
-#     
-#     if cameras:
-#         print(f"Successfully discovered {len(cameras)} camera(s).")
-#         for cam_id, info in cameras.items():
-#             print(f"--- {cam_id} ---")
-#             print(f"  IP Address: {info['ip_address']}")
-#             print(f"  ONVIF URL:  {info['onvif_url']}")
-#             print(f"  RTSP URL:   {info['rtsp_url']}")
-#     else:
-#         print("No ONVIF cameras found or an error occurred.")
+# Example Usage
+if __name__ == "__main__":
+    start = time.time()
+    
+    # Default timeout 3s * 3 retries = Max 9s (but usually faster if devices found early)
+    cameras = discover_cameras(username="admin", password="admin") 
+    
+    duration = time.time() - start
+    
+    if cameras:
+        print(f"Discovered {len(cameras)} camera(s) in {duration:.2f}s")
+        for cam_id, info in cameras.items():
+            print(f"--- {cam_id} ---")
+            print(f"  IP Address: {info['ip_address']}")
+            print(f"  ONVIF URL:  {info['onvif_url']}")
+            print(f"  RTSP URL:   {info['rtsp_url']}")
+    else:
+        print("No cameras found.")

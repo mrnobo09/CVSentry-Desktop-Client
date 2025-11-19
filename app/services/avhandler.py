@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 
 # Paremeters To Tune Performance 
-FRAME_SKIP = 3  
+FRAME_SKIP = 5  
 JPEG_QUALITY = 50  
 
 

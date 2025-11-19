@@ -26,8 +26,8 @@ async def CameraWorker(camera_id:str,rtsp_url:str,avhandler:AVHandler):
             frame = avhandler.get_frame(camera_id)
             
             if frame is not None:
-                frame_id = rdb.get_frame_id(camera_id)
-                rdb.stream_frame(camera_id, frame_id, frame)
+                # frame_id = rdb.get_frame_id(camera_id)
+                rdb.stream_frame(camera_id, frame)
 
 
             await asyncio.sleep(0.001)

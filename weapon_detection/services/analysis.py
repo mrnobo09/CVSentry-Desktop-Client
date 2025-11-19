@@ -1,8 +1,8 @@
 from ultralytics import YOLO
 import cv2
 
-model = YOLO('weights/best.pt')
-model.to('cpu')
+model = YOLO('weights/last_2.pt')
+model.to('cuda')
 
 class FrameAnalyzer:
     def __init__(self, skip_frames: int = 0):
@@ -13,7 +13,7 @@ class FrameAnalyzer:
         self.skip_frames = skip_frames
         self.counter = 0
 
-    async def analyze_frame(self, frame):
+    def analyze_frame(self, frame):
         """
         Analyze frame using YOLOv12n and optionally skip frames for performance.
         
@@ -40,7 +40,7 @@ class FrameAnalyzer:
         self.counter = 0
 
         # Run YOLO prediction
-        results = model.predict(source=frame, verbose=False,device='cpu')
+        results = model.predict(source=frame, verbose=False,device='cuda')
 
         detections = []
         frame_out = frame.copy()
@@ -64,5 +64,7 @@ class FrameAnalyzer:
                 cv2.putText(frame_out, f"{name} {conf:.2f}",
                             (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
                             0.6, (0, 255, 0), 2)
+                
+                print(f"Detected {name} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]")
 
         return frame_out, detections

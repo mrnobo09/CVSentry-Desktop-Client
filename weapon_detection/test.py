@@ -14,7 +14,7 @@ analyzer = FrameAnalyzer(skip_frames=0)
 # -----------------------------
 REDIS_HOST = "127.0.0.1"
 REDIS_PORT = 6379
-CAMERAS = ["cam_1", "cam_2"]  # Add more camera IDs if needed
+CAMERAS = ["cam_1"]
 
 # -----------------------------
 # Redis connection

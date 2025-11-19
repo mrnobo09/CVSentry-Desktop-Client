@@ -20,9 +20,9 @@ async def test_analyzer_with_real_camera():
     test_cameras = Cameras(
         root={
             "cam_1": Camera(
-                ip_address="192.168.40.2",
-                onvif_url="http://192.168.40.2:8080/onvif/device_service",
-                rtsp_url="rtsp://192.168.40.2:8080/h264_ulaw.sdp"
+                ip_address="192.168.0.124",
+                onvif_url="http://192.168.0.124:8080/onvif/device_service",
+                rtsp_url="rtsp://192.168.0.124:8080/h264_ulaw.sdp"
             )
         }
     )
@@ -38,7 +38,7 @@ async def test_analyzer_with_real_camera():
     
     try:
         # Start analyzing camera streams
-        await AnalyzeCameraStreams(test_cameras)
+        await AnalyzeCameraStreams(test_cameras.root)
         
         # Let it run for a specified duration
         test_duration = 120  # seconds

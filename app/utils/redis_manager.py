@@ -1,34 +1,34 @@
 import redis
-from typing import Optional
-
+from typing import Optional, List, Any
 
 class RedisManager:
 
     REDIS_HOST = "127.0.0.1"
     REDIS_PORT = 6379 
     MAX_FRAMES_PER_CYCLE = 100000
+    
+    STREAM_MAXLEN = 1000 
 
     def __init__(self):
-        self.client : Optional[redis.Redis] = None
+        self.client: Optional[redis.Redis] = None
+        self.pool: Optional[redis.ConnectionPool] = None
 
     def get_client(self) -> redis.Redis:
         if self.client is None:
-            self.client = redis.Redis(host=self.REDIS_HOST, port=self.REDIS_PORT,decode_responses=True)
+            if self.pool is None:
+                self.pool = redis.ConnectionPool(
+                    host=self.REDIS_HOST, 
+                    port=self.REDIS_PORT, 
+                    decode_responses=False, # Crucial for images (binary data)
+                    max_connections=50      
+                )
+            self.client = redis.Redis(connection_pool=self.pool)
         
-        try:
-            self.client.ping()
-            print("Connected to Redis server successfully.")
-        except redis.ConnectionError as e:
-            print(f"Failed to connect to Redis server: {e}")
-            raise
-
         return self.client
     
-    def get_frame_id(self,camera_id:str) -> int:
-
+    def get_frame_id(self, camera_id: str) -> int:
         r = self.get_client()
         counter_key = f'counter:{camera_id}:frame_id'
-
         current_id = r.incr(counter_key)
 
         if current_id > self.MAX_FRAMES_PER_CYCLE:
@@ -37,23 +37,40 @@ class RedisManager:
 
         return current_id
     
-    def stream_frame(self,camera_id:str,frame_id:int,frame_data):
-
+    def stream_frame(self, camera_id: str, frame_data: bytes):
+        """Push a frame to the Redis Stream with automatic trimming."""
         r = self.get_client()
-        frame_id = self.get_frame_id(camera_id)
+        
+        seq_id = self.get_frame_id(camera_id)
         
         stream_key = f'stream:{camera_id}'
-        print(f"Streaming frame {frame_id} to {stream_key}")
-
+        
         r.xadd(
             stream_key,
             {
-                'frame_id': frame_id,
-                'frame_data':frame_data,
-            }
+                'frame_id': str(seq_id),
+                'frame_data': frame_data,
+            },
+            maxlen=self.STREAM_MAXLEN,
+            approximate=True
         )
-    
+
+    def fetch_frames(self, camera_id: str, last_id: str = '$', count: int = 1, block: int = 1000) -> list:
+        """
+        Fetch new frames from the stream.
+        """
+        r = self.get_client()
+        stream_key = f'processed:{camera_id}'
+
+        try:
+            response = r.xread(
+                streams={stream_key: last_id},
+                count=count,
+                block=block
+            )
+            return response
+        except redis.RedisError as e:
+            print(f"Error fetching from {stream_key}: {e}")
+            return []
 
 redis_manager = RedisManager()
-
-    

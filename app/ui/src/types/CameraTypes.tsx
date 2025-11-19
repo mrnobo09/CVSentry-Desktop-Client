@@ -8,4 +8,8 @@ interface Cameras {
     [key: string]: Camera;
 }
 
-export type { Camera, Cameras };
+interface CameraStream {
+    cameraIds: string[];
+}
+
+export type { Camera, Cameras, CameraStream };
