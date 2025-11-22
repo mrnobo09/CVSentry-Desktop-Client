@@ -11,9 +11,11 @@ ANALYZER = FrameAnalyzer(skip_frames=0)
 active_monitors: Dict[str, dict] = {}
 CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
+GROUP_SUFFIX = "weapon_group"
+
 async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
     
-    input_stream = f"stream:{camera_id}"
+    input_stream = f"stream:{camera_id}:{GROUP_SUFFIX}"
     last_id = "$"
     print(f"[{camera_id}] Fetch task started.")
 
@@ -64,8 +66,6 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
             if analyzed_frame is not None:
                 # --- RESOLUTION CHECK START ---
                 height, width = analyzed_frame.shape[:2]
-                # cv2.circle(analyzed_frame, (300, 300), 100, (0, 0, 255), -1)
-                
                 # We print this every 50 frames to avoid spamming the console too hard,
                 # but enough to see if the resolution changes or is wrong.
                 if counter % 50 == 0:

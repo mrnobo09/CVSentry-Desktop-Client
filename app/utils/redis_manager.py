@@ -9,6 +9,12 @@ class RedisManager:
     
     STREAM_MAXLEN = 1000 
 
+    GROUPS = {
+        "faces": "face_group",
+        "weapons": "weapon_group",
+        "postures": "posture_group",
+    }
+
     def __init__(self):
         self.client: Optional[redis.Redis] = None
         self.pool: Optional[redis.ConnectionPool] = None
@@ -38,26 +44,44 @@ class RedisManager:
         return current_id
     
     def stream_frame(self, camera_id: str, frame_data: bytes):
-        """Push a frame to the Redis Stream with automatic trimming."""
+        """
+        Push a frame to the Main Stream AND fan-out to all Consumer Group streams.
+        """
         r = self.get_client()
-        
         seq_id = self.get_frame_id(camera_id)
         
-        stream_key = f'stream:{camera_id}'
-        
-        r.xadd(
-            stream_key,
-            {
-                'frame_id': str(seq_id),
-                'frame_data': frame_data,
-            },
-            maxlen=self.STREAM_MAXLEN,
-            approximate=True
-        )
+        # Prepare the data payload once
+        payload = {
+            'frame_id': str(seq_id),
+            'frame_data': frame_data,
+        }
+
+        # 1. Write to the MAIN stream (Legacy support)
+        # Key: stream:cam_01
+        main_stream_key = f'stream:{camera_id}'
+
+        # Legacy support for main stream (if needed)
+        # r.xadd(
+        #     main_stream_key,
+        #     payload,
+        #     maxlen=self.STREAM_MAXLEN,
+        #     approximate=True
+        # )
+
+        # Keys: stream:cam_01:face_group, stream:cam_01:weapon_group, etc.
+        for task_name, group_suffix in self.GROUPS.items():
+            group_stream_key = f'{main_stream_key}:{group_suffix}'
+            r.xadd(
+                group_stream_key,
+                payload,
+                maxlen=self.STREAM_MAXLEN,
+                approximate=True
+            )
+            
 
     def fetch_frames(self, camera_id: str, last_id: str = '$', count: int = 1, block: int = 1000) -> list:
         """
-        Fetch new frames from the stream.
+        Fetch new processed frames from the stream.
         """
         r = self.get_client()
         stream_key = f'processed:{camera_id}'
