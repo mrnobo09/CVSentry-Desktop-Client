@@ -1,6 +1,7 @@
 import asyncio
 import cv2
 import numpy as np
+import json
 from typing import List, Dict
 from services.analysis import FrameAnalyzer
 from utils.RedisManager import redis_manager
@@ -14,7 +15,6 @@ CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 GROUP_SUFFIX = "weapon_group"
 
 async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
-    
     input_stream = f"stream:{camera_id}:{GROUP_SUFFIX}"
     last_id = "$"
     print(f"[{camera_id}] Fetch task started.")
@@ -22,13 +22,19 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
     while True:
         try:
             msgs = await redis_manager.read_stream(input_stream, last_id)
+            # print(f"[{camera_id}] Fetched messages: {msgs}") 
             if not msgs: 
                 continue
 
             _, entries = msgs[0]
             for msg_id, fields in entries:
                 last_id = msg_id
+                
                 frame_bytes = fields.get(b'frame_data')
+                
+                frame_id_bytes = fields.get(b'frame_id')
+                frame_id = frame_id_bytes.decode('utf-8') if frame_id_bytes else None
+
                 if frame_bytes is None: continue
 
                 np_arr = np.frombuffer(frame_bytes, np.uint8)
@@ -38,7 +44,8 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                     if queue.full():
                         try: queue.get_nowait()
                         except asyncio.QueueEmpty: pass
-                    await queue.put(frame)
+                
+                    await queue.put((frame, frame_id))
 
         except asyncio.CancelledError:
             print(f"[{camera_id}] Fetch task stopped.")
@@ -55,30 +62,36 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
 
     while True:
         try:
-            frame = await queue.get()
+
+            data_package = await queue.get()
+            frame, frame_id = data_package
             
             analyzed_frame, detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
                 ANALYZER.analyze_frame,
                 frame
             )
+
+            detections_json = json.dumps(detections)
             
             if analyzed_frame is not None:
-                # --- RESOLUTION CHECK START ---
+                # --- RESOLUTION CHECK ---
                 height, width = analyzed_frame.shape[:2]
-                # We print this every 50 frames to avoid spamming the console too hard,
-                # but enough to see if the resolution changes or is wrong.
                 if counter % 50 == 0:
                      print(f"[{camera_id}] 📏 Pushing Frame Resolution: {width}x{height}")
-                # --- RESOLUTION CHECK END ---
 
                 ret, buffer = cv2.imencode('.jpg', analyzed_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 
                 if ret:
-                    meta = {"detections": len(detections), "has_threat": bool(detections)}
-                    await redis_manager.push_frame(f"processed:{camera_id}", buffer.tobytes(), meta)
+                
+                    meta = {
+                        "detections": detections_json, 
+                        "has_threat": bool(detections),
+                        "frame_id": frame_id 
+                    }
+                    
+                    await redis_manager.push_frame(f"weapon:{camera_id}", buffer.tobytes(), meta)
                     counter = counter + 1
-                    # print(f'Frame processed and pushed to redis {counter}')
             
             await asyncio.sleep(0)
 
@@ -88,6 +101,8 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
         except Exception as e:
             print(f"[{camera_id}] Analysis Error: {e}")
             await asyncio.sleep(1)
+
+
 
 async def start_cameras(camera_ids: List[str]):
     

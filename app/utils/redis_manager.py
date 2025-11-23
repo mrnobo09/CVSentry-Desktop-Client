@@ -55,18 +55,9 @@ class RedisManager:
             'frame_id': str(seq_id),
             'frame_data': frame_data,
         }
-
-        # 1. Write to the MAIN stream (Legacy support)
+        
         # Key: stream:cam_01
         main_stream_key = f'stream:{camera_id}'
-
-        # Legacy support for main stream (if needed)
-        # r.xadd(
-        #     main_stream_key,
-        #     payload,
-        #     maxlen=self.STREAM_MAXLEN,
-        #     approximate=True
-        # )
 
         # Keys: stream:cam_01:face_group, stream:cam_01:weapon_group, etc.
         for task_name, group_suffix in self.GROUPS.items():
