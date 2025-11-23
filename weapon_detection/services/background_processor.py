@@ -2,10 +2,11 @@ import asyncio
 import cv2
 import numpy as np
 import json
+import uuid 
 from typing import List, Dict
 from services.analysis import FrameAnalyzer
-from utils.RedisManager import redis_manager
 from concurrent.futures import ThreadPoolExecutor
+from utils.RedisManager import redis_manager 
 
 ANALYZER = FrameAnalyzer(skip_frames=0)
 
@@ -13,22 +14,34 @@ active_monitors: Dict[str, dict] = {}
 CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 GROUP_SUFFIX = "weapon_group"
+CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}" # Unique ID for this specific running instance
 
 async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
     input_stream = f"stream:{camera_id}:{GROUP_SUFFIX}"
-    last_id = "$"
-    print(f"[{camera_id}] Fetch task started.")
+    
+    # 1. Ensure the Consumer Group exists before reading
+    await redis_manager.ensure_group(input_stream, GROUP_SUFFIX)
+    
+    print(f"[{camera_id}] Fetch task started as Consumer: {CONSUMER_ID} in Group: {GROUP_SUFFIX}")
 
     while True:
         try:
-            msgs = await redis_manager.read_stream(input_stream, last_id)
-            # print(f"[{camera_id}] Fetched messages: {msgs}") 
+            # 2. Use XREADGROUP logic
+            msgs = await redis_manager.read_group_stream(
+                stream_key=input_stream,
+                group_name=GROUP_SUFFIX,
+                consumer_name=CONSUMER_ID
+            )
+            
             if not msgs: 
                 continue
 
             _, entries = msgs[0]
-            for msg_id, fields in entries:
-                last_id = msg_id
+            for msg_id_bytes, fields in entries:
+                
+                # We need the msg_id (e.g. "176388..-0") to ACK later. 
+                # Redis returns it as bytes in some client versions, safe to decode.
+                msg_id = msg_id_bytes.decode('utf-8') if isinstance(msg_id_bytes, bytes) else msg_id_bytes
                 
                 frame_bytes = fields.get(b'frame_data')
                 
@@ -45,7 +58,8 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                         try: queue.get_nowait()
                         except asyncio.QueueEmpty: pass
                 
-                    await queue.put((frame, frame_id))
+                    # 3. PASS THE msg_id DOWNSTREAM
+                    await queue.put((frame, frame_id, msg_id))
 
         except asyncio.CancelledError:
             print(f"[{camera_id}] Fetch task stopped.")
@@ -59,12 +73,15 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
     print(f"[{camera_id}] Analysis task started.")
     counter = 0
     loop = asyncio.get_running_loop()
+    
+    # Define stream name here to use for ACK
+    input_stream_name = f"stream:{camera_id}:{GROUP_SUFFIX}"
 
     while True:
         try:
-
+            # 4. UNPACK THE msg_id
             data_package = await queue.get()
-            frame, frame_id = data_package
+            frame, frame_id, msg_id = data_package
             
             analyzed_frame, detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
@@ -83,14 +100,19 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
                 ret, buffer = cv2.imencode('.jpg', analyzed_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 
                 if ret:
-                
                     meta = {
                         "detections": detections_json, 
                         "has_threat": bool(detections),
                         "frame_id": frame_id 
                     }
                     
+                    # Push to result stream
                     await redis_manager.push_frame(f"weapon:{camera_id}", buffer.tobytes(), meta)
+                    
+                    # 5. CRITICAL: ACKNOWLEDGE THE MESSAGE
+                    # This tells Redis "I have successfully processed this frame, remove it from pending."
+                    await redis_manager.ack_message(input_stream_name, GROUP_SUFFIX, [msg_id])
+                    
                     counter = counter + 1
             
             await asyncio.sleep(0)
@@ -102,7 +124,7 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
             print(f"[{camera_id}] Analysis Error: {e}")
             await asyncio.sleep(1)
 
-
+# start_cameras, stop_cameras, stop_all remain the same
 
 async def start_cameras(camera_ids: List[str]):
     

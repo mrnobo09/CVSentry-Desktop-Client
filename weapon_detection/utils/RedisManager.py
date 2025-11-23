@@ -44,6 +44,7 @@ class RedisManager:
             raise ConnectionError("Redis client not initialized.")
         return self.client
 
+    # --- EXISTING METHODS ---
 
     async def read_stream(self, stream_key: str, last_id: str = "$", block: int = 1000) -> List:
         if not self.client: return []
@@ -58,5 +59,41 @@ class RedisManager:
                 data[k] = str(v)
 
         await self.client.xadd(stream_key, data)
+
+    # --- NEW CONSUMER GROUP METHODS ---
+
+    async def ensure_group(self, stream_key: str, group_name: str):
+        """Creates the consumer group if it does not exist."""
+        if not self.client: return
+        try:
+            # id="0" means create group pointing to the start of stream. 
+            # mkstream=True creates the stream if it doesn't exist yet.
+            await self.client.xgroup_create(stream_key, group_name, id="0", mkstream=True)
+        except redis.ResponseError as e:
+            # "BUSYGROUP Consumer Group name already exists" is expected
+            if "BUSYGROUP" not in str(e):
+                print(f"⚠️ Error creating group {group_name}: {e}")
+
+    async def read_group_stream(self, stream_key: str, group_name: str, consumer_name: str, count: int = 1, block: int = 1000) -> List:
+        """Reads from a consumer group using XREADGROUP."""
+        if not self.client: return []
+        try:
+            # '>' means "give me messages never delivered to any other consumer"
+            return await self.client.xreadgroup(
+                groupname=group_name,
+                consumername=consumer_name,
+                streams={stream_key: ">"},
+                count=count,
+                block=block
+            )
+        except Exception as e:
+            print(f"❌ Read Group Error: {e}")
+            return []
+
+    async def ack_message(self, stream_key: str, group_name: str, msg_ids: List[str]):
+        """Acknowledges processed messages."""
+        if not self.client: return
+        if not msg_ids: return
+        await self.client.xack(stream_key, group_name, *msg_ids)
 
 redis_manager = RedisManager.get_instance()

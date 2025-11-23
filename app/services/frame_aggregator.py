@@ -47,6 +47,7 @@ async def frame_aggregator(redis_manager, camera_ids: List[str]):
                     frame_id_bytes = fields.get(b'frame_id')
                     try:
                         frame_id = int(frame_id_bytes.decode('utf-8')) if frame_id_bytes else -1
+                        print(f"🔄 [{camera_id}] Frame ID: {frame_id}")
                     except ValueError:
                         frame_id = -1
 
