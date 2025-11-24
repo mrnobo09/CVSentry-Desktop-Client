@@ -32,7 +32,7 @@ async def start_camera_analysis(cameras: Cameras):
             )
 
             requests.post(
-                "http://192.168.100.14:8001/start-monitoring", 
+                "http://192.168.0.100:8001/start-monitoring", 
                 json={"cameras": camera_ids}, 
                 timeout=5
             )
