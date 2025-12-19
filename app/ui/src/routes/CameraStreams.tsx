@@ -4,6 +4,8 @@ import { StopCircle, Grid3x3, AlertTriangle } from 'lucide-react';
 import CameraFeed from '../components/CameraFeed';
 import type { CameraStream } from '../types/CameraTypes';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
+
 export default function CameraStreams() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -24,7 +26,7 @@ export default function CameraStreams() {
     console.log('Stopping analysis on all cameras...');
 
     try {
-      await fetch('http://localhost:4100/cameras/stop', {
+      await fetch(`${BACKEND_URL}/cameras/stop`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -5,6 +5,8 @@ import CameraInfo from '../components/CameraInfo';
 import type { Cameras, Camera, CameraStream } from '../types/CameraTypes';
 import { PlayCircle, Database, Loader2 } from 'lucide-react';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
+
 // Internal type for UI rendering (includes the ID key)
 interface CameraWithId extends Camera {
   id: string;
@@ -28,7 +30,7 @@ export default function Home() {
 
     const fetchCameras = async () => {
       try {
-        const response = await axios.get<Cameras>(`http://127.0.0.1:4100/cameras/list`);
+        const response = await axios.get<Cameras>(`${BACKEND_URL}/cameras/list`);
         console.log(`Fetched cameras:`, JSON.stringify(response.data));
         
         const camerasArray = Object.entries(response.data).map(([key, data]) => ({
@@ -81,7 +83,7 @@ export default function Home() {
       // Send POST request with the formatted payload
       console.log("Sending payload:", JSON.stringify(payload, null, 2));
       
-      await axios.post('http://127.0.0.1:4100/cameras/start', payload);
+      await axios.post(`${BACKEND_URL}/cameras/start`, payload);
 
       // Navigate to streams page passing the IDs using CameraStream type
       const streamState: CameraStream = { 

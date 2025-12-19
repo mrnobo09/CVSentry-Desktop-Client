@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import mpegts from 'mpegts.js';
 import { Maximize2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 
 interface CameraFeedProps {
@@ -7,81 +8,103 @@ interface CameraFeedProps {
 
 export default function CameraFeed({ cam_id }: CameraFeedProps) {
   const [isConnected, setIsConnected] = useState(false);
-  const [hasFirstFrame, setHasFirstFrame] = useState(false); 
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<mpegts.Player | null>(null);
+
+  const getStreamUrl = (id: string) => {
+    const baseUrl = import.meta.env.VITE_BASE_RTMP_URL || 'http://localhost:8080/live';
+    const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    return `${cleanBase}/${id}.flv`;
+  };
 
   useEffect(() => {
-    setIsConnected(false);
-    setHasFirstFrame(false);
-    setError(null);
+    if (!mpegts.getFeatureList().mseLivePlayback) {
+      setError('MSE Live Playback not supported');
+      return;
+    }
 
-    const WS_URL = `ws://127.0.0.1:4100/cameras/ws/${cam_id}`;
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
+    let isMounted = true;
+    let player: mpegts.Player | null = null;
 
-    ws.onopen = () => {
-      console.log(`Connected to stream: ${cam_id}`);
-      setIsConnected(true);
-      setError(null);
-    };
-    
-    ws.onmessage = (event) => {
+    const initPlayer = async () => {
       try {
-        const data = JSON.parse(event.data);
+        const url = getStreamUrl(cam_id);
         
-        if (data.image && canvasRef.current) {
-          const ctx = canvasRef.current.getContext('2d');
+        player = mpegts.createPlayer({
+          type: 'flv',
+          url: url,
+          isLive: true,
+          hasAudio: false,
+          cors: true,
+        }, {
+          enableWorker: true,
+          enableStashBuffer: false,
+          stashInitialSize: 128,
+        });
+        
+        playerRef.current = player;
+
+        if (videoRef.current && isMounted) {
+          player.attachMediaElement(videoRef.current);
+          player.load();
           
-          const img = new Image();
-          img.onload = () => {
-            if (canvasRef.current && ctx) {
-          
-                if (canvasRef.current.width !== img.width || canvasRef.current.height !== img.height) {
-                    canvasRef.current.width = img.width;
-                    canvasRef.current.height = img.height;
-                }
-                
-                ctx.drawImage(img, 0, 0);
-                setHasFirstFrame((prev) => {
-                    if (!prev) return true;
-                    return prev;
-                });
+          try {
+            await player.play();
+            if (isMounted) {
+                setIsConnected(true);
+                setIsLoading(false);
             }
-          };
-          img.src = data.image;
+          } catch (playError) {
+            if (isMounted && videoRef.current) {
+              videoRef.current.muted = true;
+              await player.play();
+              setIsConnected(true);
+              setIsLoading(false);
+            }
+          }
         }
       } catch (err) {
-        console.error("Frame parsing error:", err);
+        if (isMounted) {
+          console.error("Stream init error:", err);
+          setError('Connection Failed');
+          setIsConnected(false);
+        }
       }
     };
-    
-    ws.onerror = () => {
-      console.error(`WebSocket error for ${cam_id}`);
-      setError('Connection failed');
-      setIsConnected(false);
-    };
-    
-    ws.onclose = () => {
-      console.log(`Stream closed: ${cam_id}`);
-      setIsConnected(false);
-    };
+
+    initPlayer();
+
+    if (player) {
+        (player as mpegts.Player).on(mpegts.Events.ERROR, (errType, errDetail) => {
+            if (!isMounted) return;
+            if (errType !== mpegts.ErrorTypes.NETWORK_ERROR) {
+                console.error('Player Error:', errType, errDetail);
+            }
+        });
+    }
 
     return () => {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+      isMounted = false;
+      if (player) {
+        try {
+          player.pause();
+          player.unload();
+          player.detachMediaElement();
+          player.destroy();
+        } catch (e) {
+          // Ignore destruction errors
+        }
+        playerRef.current = null;
       }
     };
-
-  }, [cam_id]); 
+  }, [cam_id]);
 
   const handleFullscreen = () => {
-    if (canvasRef.current) {
-      if (canvasRef.current.requestFullscreen) {
-        canvasRef.current.requestFullscreen();
-      }
+    if (videoRef.current?.requestFullscreen) {
+      videoRef.current.requestFullscreen();
     }
   };
 
@@ -102,7 +125,7 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
               ) : isConnected ? (
                 <span className="text-green-400">Live Feed</span>
               ) : (
-                'Disconnected'
+                'Connecting...'
               )}
             </p>
           </div>
@@ -119,15 +142,17 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
       </div>
 
       <div className="relative bg-black aspect-video flex items-center justify-center">
-        {/* Canvas remains visible once hasFirstFrame is true */}
-        <canvas
-            ref={canvasRef}
-            className={`w-full h-full object-contain ${!hasFirstFrame ? 'hidden' : 'block'}`}
+        <video
+            ref={videoRef}
+            className="w-full h-full object-contain"
+            controls={false}
+            playsInline
+            muted={true}
         />
 
-        {isConnected && !hasFirstFrame && !error && (
-            <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-gray-500 text-center">
+        {isLoading && !error && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+            <div className="text-gray-300 text-center">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-2"></div>
                 <p className="text-xs uppercase tracking-widest">Buffering...</p>
             </div>
@@ -135,18 +160,18 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
         )}
 
         {error && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-gray-900/80">
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-gray-900/90 z-20">
             <AlertCircle className="w-12 h-12 mb-2" />
             <p className="text-sm font-semibold">{error}</p>
-            <p className="text-xs text-gray-500 mt-1">Check server connection</p>
+            <p className="text-xs text-gray-500 mt-1">Check media server</p>
             </div>
         )}
 
-        {!isConnected && !error && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-600">
+        {!isConnected && !isLoading && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-gray-600 z-10">
             <div className="text-center">
                 <WifiOff className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Offline</p>
+                <p className="text-sm">Signal Lost</p>
             </div>
             </div>
         )}
