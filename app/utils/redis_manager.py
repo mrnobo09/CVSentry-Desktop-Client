@@ -43,16 +43,15 @@ class RedisManager:
 
         return current_id
     
-    def stream_frame(self, camera_id: str, frame_data: bytes):
+    def stream_frame(self, camera_id: str, frame_id:int, frame_data: bytes):
         """
         Push a frame to the Main Stream AND fan-out to all Consumer Group streams.
         """
         r = self.get_client()
-        seq_id = self.get_frame_id(camera_id)
         
         # Prepare the data payload once
         payload = {
-            'frame_id': str(seq_id),
+            'frame_id': str(frame_id),
             'frame_data': frame_data,
         }
         

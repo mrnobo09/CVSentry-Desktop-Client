@@ -2,6 +2,7 @@ import asyncio
 from services.avhandler import AVHandler
 from schemas.cameras import Cameras
 from utils.redis_manager import redis_manager as rdb
+from utils.frame_cache import frame_cache
 
 
 async def AnalyzeCameraStreams(cameras:Cameras):
@@ -24,10 +25,10 @@ async def CameraWorker(camera_id:str,rtsp_url:str,avhandler:AVHandler):
 
         while True:
             frame = avhandler.get_frame(camera_id)
-            
             if frame is not None:
-                # frame_id = rdb.get_frame_id(camera_id)
-                rdb.stream_frame(camera_id, frame)
+                frame_id = rdb.get_frame_id(camera_id)  # Gets frame ID from Redis Manager Util
+                frame_cache.add(camera_id, frame_id, frame)  # Caches frame locally  ->   Will be picked up by aggregator to merge results
+                rdb.stream_frame(camera_id, frame_id, frame) # Streams frame to Redis
 
 
             await asyncio.sleep(0.001)

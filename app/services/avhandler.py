@@ -7,9 +7,8 @@ from typing import Dict, Optional
 
 
 # Paremeters To Tune Performance 
-FRAME_SKIP = 5  
+FRAME_SKIP = 2  
 JPEG_QUALITY = 50  
-
 
 class AVHandler:
     def __init__(self):

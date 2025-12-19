@@ -14,19 +14,21 @@ active_monitors: Dict[str, dict] = {}
 CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 GROUP_SUFFIX = "weapon_group"
-CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}" # Unique ID for this specific running instance
+CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}" 
 
 async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
+    """
+    Fetches frames from Redis Input Stream for processing.
+    """
     input_stream = f"stream:{camera_id}:{GROUP_SUFFIX}"
     
-    # 1. Ensure the Consumer Group exists before reading
+    # Ensure Consumer Group exists
     await redis_manager.ensure_group(input_stream, GROUP_SUFFIX)
     
-    print(f"[{camera_id}] Fetch task started as Consumer: {CONSUMER_ID} in Group: {GROUP_SUFFIX}")
+    print(f"[{camera_id}] Fetch task started as Consumer: {CONSUMER_ID}")
 
     while True:
         try:
-            # 2. Use XREADGROUP logic
             msgs = await redis_manager.read_group_stream(
                 stream_key=input_stream,
                 group_name=GROUP_SUFFIX,
@@ -38,17 +40,19 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
 
             _, entries = msgs[0]
             for msg_id_bytes, fields in entries:
-                
-                # We need the msg_id (e.g. "176388..-0") to ACK later. 
-                # Redis returns it as bytes in some client versions, safe to decode.
                 msg_id = msg_id_bytes.decode('utf-8') if isinstance(msg_id_bytes, bytes) else msg_id_bytes
                 
+                # We still need to READ the frame to analyze it
                 frame_bytes = fields.get(b'frame_data')
-                
                 frame_id_bytes = fields.get(b'frame_id')
+                
+                # Only frame_id is strictly needed for the output
                 frame_id = frame_id_bytes.decode('utf-8') if frame_id_bytes else None
 
-                if frame_bytes is None: continue
+                if frame_bytes is None: 
+                    # Ack bad message so it doesn't get stuck
+                    await redis_manager.ack_message(input_stream, GROUP_SUFFIX, [msg_id])
+                    continue
 
                 np_arr = np.frombuffer(frame_bytes, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -58,7 +62,6 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                         try: queue.get_nowait()
                         except asyncio.QueueEmpty: pass
                 
-                    # 3. PASS THE msg_id DOWNSTREAM
                     await queue.put((frame, frame_id, msg_id))
 
         except asyncio.CancelledError:
@@ -70,50 +73,50 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
 
 
 async def process_camera_task(camera_id: str, queue: asyncio.Queue):
+    """
+    Analyzes frames and pushes ONLY metadata (detections) to the result stream.
+    """
     print(f"[{camera_id}] Analysis task started.")
-    counter = 0
     loop = asyncio.get_running_loop()
-    
-    # Define stream name here to use for ACK
     input_stream_name = f"stream:{camera_id}:{GROUP_SUFFIX}"
 
     while True:
         try:
-            # 4. UNPACK THE msg_id
             data_package = await queue.get()
             frame, frame_id, msg_id = data_package
             
-            analyzed_frame, detections = await loop.run_in_executor(
+            # Analyze frame (CPU intensive)
+            # We ignore the returned 'frame' since we aren't sending it back
+            detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
                 ANALYZER.analyze_frame,
                 frame
             )
 
-            detections_json = json.dumps(detections)
-            
-            if analyzed_frame is not None:
-                # --- RESOLUTION CHECK ---
-                height, width = analyzed_frame.shape[:2]
-                if counter % 50 == 0:
-                     print(f"[{camera_id}] 📏 Pushing Frame Resolution: {width}x{height}")
-
-                ret, buffer = cv2.imencode('.jpg', analyzed_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            # --- OUTPUT LOGIC ---
+            # Only proceed if we have valid data
+            if frame_id:
+                detections_json = json.dumps(detections)
+                det_count = len(detections)
                 
-                if ret:
-                    meta = {
-                        "detections": detections_json, 
-                        "has_threat": bool(detections),
-                        "frame_id": frame_id 
-                    }
-                    
-                    # Push to result stream
-                    await redis_manager.push_frame(f"weapon:{camera_id}", buffer.tobytes(), meta)
-                    
-                    # 5. CRITICAL: ACKNOWLEDGE THE MESSAGE
-                    # This tells Redis "I have successfully processed this frame, remove it from pending."
-                    await redis_manager.ack_message(input_stream_name, GROUP_SUFFIX, [msg_id])
-                    
-                    counter = counter + 1
+                # Prepare Metadata Payload (NO IMAGES)
+                payload = {
+                    "frame_id": frame_id,
+                    "detections": detections_json,
+                    "detections_count": str(det_count),
+                    "has_threat": str(bool(detections)),
+                    "worker_id": CONSUMER_ID
+                }
+                
+                # Push ONLY metadata to the result stream
+                # Using client.xadd directly to avoid any image-wrapper logic in push_frame
+                await redis_manager.client.xadd(
+                    name=f"weapon:{camera_id}",
+                    fields=payload
+                )
+
+                # ACK input message
+                await redis_manager.ack_message(input_stream_name, GROUP_SUFFIX, [msg_id])
             
             await asyncio.sleep(0)
 
@@ -124,41 +127,26 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
             print(f"[{camera_id}] Analysis Error: {e}")
             await asyncio.sleep(1)
 
-# start_cameras, stop_cameras, stop_all remain the same
 
 async def start_cameras(camera_ids: List[str]):
-    
     for cam in camera_ids:
         if cam in active_monitors:
             print(f"Camera {cam} is already active. Skipping.")
             continue
             
         print(f"🚀 Booting up monitor for: {cam}")
-        
         q = asyncio.Queue(maxsize=1)
-        
         t1 = asyncio.create_task(fetch_frames_task(cam, q))
         t2 = asyncio.create_task(process_camera_task(cam, q))
-        
-        active_monitors[cam] = {
-            "queue": q,
-            "tasks": [t1, t2]
-        }
+        active_monitors[cam] = {"queue": q, "tasks": [t1, t2]}
 
 async def stop_cameras(camera_ids: List[str]):
     for cam in camera_ids:
-        if cam not in active_monitors:
-            continue
-            
-        print(f"Stopping monitor for: {cam}")
+        if cam not in active_monitors: continue
         tasks = active_monitors[cam]["tasks"]
-        
-        for t in tasks:
-            t.cancel()
-        
+        for t in tasks: t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         del active_monitors[cam]
 
 async def stop_all():
-    all_cams = list(active_monitors.keys())
-    await stop_cameras(all_cams)
+    await stop_cameras(list(active_monitors.keys()))

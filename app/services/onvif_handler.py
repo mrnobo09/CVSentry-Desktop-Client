@@ -96,21 +96,21 @@ def discover_cameras(username="admin", password="admin", discovery_timeout=3, re
 
     return cameras
 
-# Example Usage
-if __name__ == "__main__":
-    start = time.time()
+# # Example Usage
+# if __name__ == "__main__":
+#     start = time.time()
     
-    # Default timeout 3s * 3 retries = Max 9s (but usually faster if devices found early)
-    cameras = discover_cameras(username="admin", password="admin") 
+#     # Default timeout 3s * 3 retries = Max 9s (but usually faster if devices found early)
+#     cameras = discover_cameras(username="admin", password="admin") 
     
-    duration = time.time() - start
+#     duration = time.time() - start
     
-    if cameras:
-        print(f"Discovered {len(cameras)} camera(s) in {duration:.2f}s")
-        for cam_id, info in cameras.items():
-            print(f"--- {cam_id} ---")
-            print(f"  IP Address: {info['ip_address']}")
-            print(f"  ONVIF URL:  {info['onvif_url']}")
-            print(f"  RTSP URL:   {info['rtsp_url']}")
-    else:
-        print("No cameras found.")
+#     if cameras:
+#         print(f"Discovered {len(cameras)} camera(s) in {duration:.2f}s")
+#         for cam_id, info in cameras.items():
+#             print(f"--- {cam_id} ---")
+#             print(f"  IP Address: {info['ip_address']}")
+#             print(f"  ONVIF URL:  {info['onvif_url']}")
+#             print(f"  RTSP URL:   {info['rtsp_url']}")
+#     else:
+#         print("No cameras found.")

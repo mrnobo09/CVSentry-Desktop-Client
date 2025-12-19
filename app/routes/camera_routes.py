@@ -2,6 +2,7 @@ from fastapi import APIRouter,WebSocket,WebSocketDisconnect
 from services.onvif_handler import discover_cameras
 from schemas.cameras import Cameras
 from services.analyzer import AnalyzeCameraStreams
+from services.rtmp_service import start_rtmp_broadcasting
 from utils.redis_manager import redis_manager
 from utils.jpeg_to_base64 import jpeg_bytes_to_base64
 from services.frame_aggregator import frame_aggregator
@@ -18,11 +19,25 @@ async def list_cameras():
 
 @router.post("/start")
 async def start_camera_analysis(cameras: Cameras):
+    """
+    Starts:
+    1. Analysis Loop (Reads RTSP -> Redis -> Workers)
+    2. RTMP Service (Reads Aggregator -> FFmpeg -> SRS)
+    3. Trigger Microservice
+    """
     cameras_dict = cameras.root
     camera_ids = list(cameras_dict.keys())
     
+    # 1. Start Analysis (Ingestion & Worker Management)
+    # Ideally, keep track of this task to cancel it later
     asyncio.create_task(AnalyzeCameraStreams(cameras_dict))
 
+    # 2. Start RTMP Broadcasting Service (Background Task)
+    # This runs the frame_aggregator -> FFmpeg pipeline
+    print(f"🎥 Starting RTMP Service for {len(camera_ids)} cameras...")
+    asyncio.create_task(start_rtmp_broadcasting(camera_ids))
+
+    # 3. Trigger External Microservice (Legacy/Other Logic)
     def call_microservice():
         try:
             requests.post(
@@ -30,50 +45,43 @@ async def start_camera_analysis(cameras: Cameras):
                 json={"cameras": camera_ids}, 
                 timeout=5
             )
-
-            requests.post(
-                "http://192.168.0.100:8001/start-monitoring", 
-                json={"cameras": camera_ids}, 
-                timeout=5
-            )
-
             print("✅ Microservice triggered")
         except Exception as e:
             print(f"❌ Microservice failed: {e}")
 
     await asyncio.to_thread(call_microservice)
 
-    return {"status": "Analysis started"}
+    return {
+        "status": "System started", 
+        "details": f"Analyzing and Streaming {len(camera_ids)} cameras."
+    }
 
-
-
-
-@router.websocket("/ws/{camera_id}")
-async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
-    await websocket.accept()
+# @router.websocket("/ws/{camera_id}")
+# async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
+#     await websocket.accept()
     
-    try:
+#     try:
     
-        async for data in frame_aggregator(redis_manager, [camera_id]):
+#         async for data in frame_aggregator(redis_manager, [camera_id]):
             
-            frame_bytes = data['frame_bytes']
+#             frame_bytes = data['frame_bytes']
             
-            b64_image = jpeg_bytes_to_base64(frame_bytes, include_prefix=True)
+#             b64_image = jpeg_bytes_to_base64(frame_bytes, include_prefix=True)
             
-            payload = {
-                "camera_id": data['camera_id'],
-                "frame_id": data['frame_id'],
-                "has_threat": data['has_threat'], 
-                "detections": data['detections'],  
-                "image": b64_image
-            }
+#             payload = {
+#                 "camera_id": data['camera_id'],
+#                 "frame_id": data['frame_id'],
+#                 "has_threat": data['has_threat'], 
+#                 "detections": data['detections'],  
+#                 "image": b64_image
+#             }
             
-            await websocket.send_json(payload)
+#             await websocket.send_json(payload)
             
-            # Optional: Control frame rate
-            await asyncio.sleep(0.001)
+#             # Optional: Control frame rate
+#             await asyncio.sleep(0.001)
 
-    except WebSocketDisconnect:
-        print(f"🔴 Disconnected: {camera_id}")
-    except Exception as e:
-        print(f"⚠️ Error: {e}")
+#     except WebSocketDisconnect:
+#         print(f"🔴 Disconnected: {camera_id}")
+#     except Exception as e:
+#         print(f"⚠️ Error: {e}")

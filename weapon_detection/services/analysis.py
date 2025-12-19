@@ -43,7 +43,6 @@ class FrameAnalyzer:
         results = model.predict(source=frame, verbose=False,device='cpu')
 
         detections = []
-        frame_out = frame.copy()
 
         for r in results:
             for b in r.boxes:
@@ -59,12 +58,5 @@ class FrameAnalyzer:
                     "box": [x1, y1, x2, y2]
                 })
 
-                # Draw bounding box + label on the frame
-                cv2.rectangle(frame_out, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame_out, f"{name} {conf:.2f}",
-                            (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6, (0, 255, 0), 2)
-                
-                print(f"Detected {name} with confidence {conf:.2f} at [{x1}, {y1}, {x2}, {y2}]")
 
-        return frame_out, detections
+        return detections
