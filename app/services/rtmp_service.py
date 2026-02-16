@@ -1,11 +1,12 @@
 import asyncio
+import os
 from typing import List, Dict
 from utils.redis_manager import redis_manager as rdb
 from services.frame_aggregator import frame_aggregator
 from utils.rtmp_streamer import RTMPStreamer
 
 # Configuration
-SRS_BASE_URL = "rtmp://localhost/live"  # Change this if SRS is on another IP
+SRS_BASE_URL = os.getenv("SRS_BASE_URL", "rtmp://localhost/live")  # Change this if SRS is on another IP
 
 # Keep track of active tasks so we don't start duplicate streams
 _active_stream_tasks: Dict[str, asyncio.Task] = {}

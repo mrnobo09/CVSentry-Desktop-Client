@@ -1,7 +1,19 @@
 from ultralytics import YOLO
 import cv2
+import math
+import numpy as np
 
-model = YOLO('weights/best_2.onnx')
+# Load Models
+try:
+    weapon_model = YOLO('weights/weapon/Guns-100-11m.onnx')
+    pose_model = YOLO('weights/pose/yolov11s-pose.onnx') 
+except Exception as e:
+    print(f"Error loading models: {e}. Attempting to download/load defaults if possible.")
+    # Fallback or re-raise depending on strictness. 
+    # For now, we assume files exist or Ultralytics will auto-download if passed a .pt name
+    # But user specifically asked for .onnx, so we expect them to be there.
+    # If not found, this will crash, which is better than failing silently.
+    raise e
 
 class FrameAnalyzer:
     def __init__(self, skip_frames: int = 0):
@@ -14,48 +26,154 @@ class FrameAnalyzer:
 
     def analyze_frame(self, frame):
         """
-        Analyze frame using YOLOv12n and optionally skip frames for performance.
+        Analyze frame using YOLO models for Weapon and Pose.
         
         Returns:
-            frame_out: The frame (drawn with boxes if prediction applied)
-            detections: list of dicts with:
-                        {
-                          "class_id": int,
-                          "class_name": str,
-                          "score": float,
-                          "box": [x1, y1, x2, y2]
-                        }
-                        Empty list if frame was skipped
+            detections: list of dicts with weapon info, pose info, and threat status.
         """
         if frame is None:
-            return None, []
+            return []
 
         # Skip frame logic
         if self.counter < self.skip_frames:
             self.counter += 1
-            return frame, []  # skipped, return original frame without predictions
+            return []  # skipped
 
-        # Reset counter
         self.counter = 0
 
-        # Run YOLO prediction
-        results = model.predict(source=frame, verbose=False,device='cpu',conf=0.7, iou=0.5, max_det=50)
+        # 1. Run Weapon Detection
+        weapon_results = weapon_model.predict(source=frame, verbose=False, device='cpu', conf=0.7, iou=0.5, max_det=50)
+        
+        # 2. Run Pose Estimation
+        # Using a lower conf for pose to ensure we catch people even if partially occluded
+        pose_results = pose_model.predict(source=frame, verbose=False, device='cpu', conf=0.5)
 
         detections = []
-
-        for r in results:
+        
+        # Extract Weapon Boxes
+        weapons = []
+        for r in weapon_results:
             for b in r.boxes:
                 x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
                 conf = float(b.conf[0])
                 cls = int(b.cls[0])
-                name = model.names[cls]
-
-                detections.append({
-                    "class_id": cls,
-                    "class_name": name,
+                name = weapon_model.names[cls]
+                weapons.append({
+                    "box": [x1, y1, x2, y2],
                     "score": conf,
-                    "box": [x1, y1, x2, y2]
+                    "class_name": name,
+                    "center": [(x1+x2)/2, (y1+y2)/2]
                 })
 
+        # Extract Action/Pose Data
+        # We need to map weapons to people
+        people = []
+        if pose_results and len(pose_results) > 0:
+            for r in pose_results:
+                if r.keypoints is not None:
+                    # r.keypoints.xy is (N, 17, 2)
+                    # We iterate through each person detected
+                    for idx, kpts in enumerate(r.keypoints.xy.cpu().numpy()):
+                        box = r.boxes.xyxy[idx].tolist() if r.boxes else [0,0,0,0]
+                        people.append({
+                            "id": idx, # Index in this frame's results
+                            "box": box,
+                            "keypoints": kpts, # Array of [x, y]
+                            "has_weapon": False,
+                            "weapon_data": None,
+                            "is_aiming": False,
+                            "aiming_at": None
+                        })
+
+        # 3. Logic: Match Weapon to Person (Wrist)
+        # COCO Keypoints: 9: Left Wrist, 10: Right Wrist, 7: Left Elbow, 8: Right Elbow
+        # We use a distance threshold.
+        max_dist =  max(frame.shape[0], frame.shape[1]) * 0.15 # 15% of screen dimension
+
+        for p in people:
+            kpts = p['keypoints']
+            # Check wrists (indices 9 and 10)
+            # kpts structure: [[x,y], [x,y], ...]
+            # Some models return [x,y,conf] or just [x,y]. Ultralytics .xy is [x,y].
+            
+            # Filter valid keypoints (0,0 is usually invalid)
+            valid_wrists = []
+            if kpts[9][0] > 0 and kpts[9][1] > 0: valid_wrists.append(('left', kpts[9], kpts[7])) # wrist, elbow
+            if kpts[10][0] > 0 and kpts[10][1] > 0: valid_wrists.append(('right', kpts[10], kpts[8]))
+
+            best_weapon = None
+            min_dist = float('inf')
+            active_wrist = None
+            active_elbow = None
+
+            for w in weapons:
+                w_center = w['center']
+                for side, wrist, elbow in valid_wrists:
+                    dist = math.hypot(wrist[0] - w_center[0], wrist[1] - w_center[1])
+                    if dist < max_dist and dist < min_dist:
+                        min_dist = dist
+                        best_weapon = w
+                        active_wrist = wrist
+                        active_elbow = elbow
+            
+            if best_weapon:
+                p['has_weapon'] = True
+                p['weapon_data'] = best_weapon
+                
+                # 4. Logic: Threat Detection (Holding Weapon)
+                # Vector: Elbow -> Wrist
+                if active_elbow is not None and active_elbow[0] > 0:
+                    # Calculate vector
+                    vec_x = active_wrist[0] - active_elbow[0]
+                    vec_y = active_wrist[1] - active_elbow[1]
+                    
+                    # Normalize vector
+                    mag = math.hypot(vec_x, vec_y)
+                    if mag > 0:
+                        vec_x /= mag
+                        vec_y /= mag
+                        
+                        # New Logic: Raising arm/Holding gun aligns with a vector
+                        # We treat ANY holding as a threat for now as requested.
+                        # We preserve the vector for drawing purposes.
+                        
+                        p['is_aiming'] = True
+                        # We don't have a specific target, so we can set it to None or a dummy box
+                        # The UI might expect a box for red highlighting. 
+                        # Let's set it to the person's own box or a projected point if strictly needed, 
+                        # but for now None is safe if we handle it in drawing.
+                        p['aiming_at'] = None 
+                        p['aiming_vec'] = [float(vec_x), float(vec_y)]
+        
+        # Format final output
+        # We return a flat list of "detections" for the frontend
+        # Including Weapons and People info
+        
+        # 1. Add all weapons (even if not held? Yes, existing logic likely expects them)
+        for w in weapons:
+            detections.append(w)
+            
+        # 2. Add People Metadata
+        for p in people:
+            pose_entry = {
+                "class_name": "person_pose",
+                "box": p['box'],
+                "score": 1.0, # Pose result score?
+                "keypoints": p['keypoints'].tolist(),
+                "has_weapon": p['has_weapon'],
+                "is_aiming": p['is_aiming']
+            }
+            if p['is_aiming']:
+                 pose_entry['aiming_at'] = p['aiming_at']
+                 pose_entry['aiming_vec'] = p.get('aiming_vec')
+                 
+                 # Add specific threat entry for the UI to scream
+                 detections.append({
+                     "class_name": "THREAT_AIMING",
+                     "score": 1.0,
+                     "box": p['aiming_at'] # Highlight victim?
+                 })
+                 
+            detections.append(pose_entry)
 
         return detections

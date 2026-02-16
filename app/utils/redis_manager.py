@@ -1,10 +1,11 @@
 import redis
+import os
 from typing import Optional, List, Any
 
 class RedisManager:
 
-    REDIS_HOST = "127.0.0.1"
-    REDIS_PORT = 6379 
+    REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", 6379)) 
     MAX_FRAMES_PER_CYCLE = 100000
     
     STREAM_MAXLEN = 1000 

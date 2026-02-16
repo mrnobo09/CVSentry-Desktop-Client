@@ -87,11 +87,14 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
             
             # Analyze frame (CPU intensive)
             # We ignore the returned 'frame' since we aren't sending it back
+            # Analyze frame (CPU intensive)
             detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
                 ANALYZER.analyze_frame,
                 frame
             )
+            # analyze_frame now returns just list[dict]
+            # No need to unpack (frame, detections)
 
             # --- OUTPUT LOGIC ---
             # Only proceed if we have valid data
