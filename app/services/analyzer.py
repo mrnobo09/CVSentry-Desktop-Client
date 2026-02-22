@@ -3,43 +3,58 @@ from services.avhandler import AVHandler
 from schemas.cameras import Cameras
 from utils.redis_manager import redis_manager as rdb
 from utils.frame_cache import frame_cache
+from routes.node_routes import notify_cameras_active
+
+# Log every Nth frame to avoid console flood
+LOG_EVERY_N_FRAMES = 30
 
 
-async def AnalyzeCameraStreams(cameras:Cameras):
+async def AnalyzeCameraStreams(cameras: Cameras):
     """Analyze camera streams asynchronously."""
     for camera_id, camera_info in cameras.items():
         rtsp_url = camera_info.rtsp_url
-        #ip_address = camera_info.ip_address
-
-        print(f"Starting analysis for camera {camera_id} at {rtsp_url}")
-
+        print(f"[app/{camera_id}] 🎬 Starting RTSP ingestion from {rtsp_url}")
         av_manager = AVHandler()
-
         asyncio.create_task(CameraWorker(camera_id, rtsp_url, av_manager))
 
 
-async def CameraWorker(camera_id:str,rtsp_url:str,avhandler:AVHandler):
+async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
     """Worker to handle individual camera stream analysis."""
     try:
         await avhandler.start_pipeline(camera_id, rtsp_url)
 
+        frames_pushed = 0
+        first_frame_notified = False  # Only notify Django once per camera
+
         while True:
             frame = avhandler.get_frame(camera_id)
             if frame is not None:
-                frame_id = rdb.get_frame_id(camera_id)  # Gets frame ID from Redis Manager Util
-                frame_cache.add(camera_id, frame_id, frame)  # Caches frame locally  ->   Will be picked up by aggregator to merge results
-                rdb.stream_frame(camera_id, frame_id, frame) # Streams frame to Redis
+                frame_id = rdb.get_frame_id(camera_id)
+                frame_cache.add(camera_id, frame_id, frame)
+                rdb.stream_frame(camera_id, frame_id, frame)
 
+                frames_pushed += 1
+
+                # Trigger 2: notify Django the moment the first real frame arrives
+                if not first_frame_notified:
+                    first_frame_notified = True
+                    print(f"[app/{camera_id}] 🖼️  First frame received — notifying Django node is live")
+                    asyncio.create_task(
+                        notify_cameras_active([camera_id], reason="first frame live")
+                    )
+
+                if frames_pushed % LOG_EVERY_N_FRAMES == 0:
+                    print(
+                        f"[app/{camera_id}] 📤 Pushed {frames_pushed} frames to Redis "
+                        f"(latest frame_id={frame_id}, size={len(frame)} bytes)"
+                    )
 
             await asyncio.sleep(0.001)
 
     except Exception as e:
-        print(f"Failed to start pipeline for camera {camera_id}: {e}")
+        print(f"[app/{camera_id}] ❌ Pipeline failed: {e}")
 
     finally:
         if camera_id in avhandler.containers:
             await avhandler.stop_pipeline(camera_id)
-            print(f"Stopped pipeline for camera {camera_id}")
-
-        
-    
+            print(f"[app/{camera_id}] 🛑 Pipeline stopped")

@@ -6,35 +6,36 @@ from typing import List, Dict, Any
 from utils.frame_cache import frame_cache
 from utils.draw_utils import draw_detections
 
-async def frame_aggregator(redis_manager, camera_ids: List[str]):
+async def frame_aggregator(redis_manager, camera_ids: list):
     """
-    Aggregates results, fetches frames, draws detections (optimized),
-    yields results, and prints FPS stats.
+    Aggregates weapon detection results, draws annotations, and yields frames
+    for the RTMP broadcaster.
     """
-    
-    # Redis Streams
     streams = {f"weapon:{cam_id}": "$" for cam_id in camera_ids}
 
-    # Optimization 1: Reduce Buffer Size
-    # A size of 5 adds ~1s latency at 5 FPS. Reducing to 2 is safer for live streams.
     BUFFER_SIZE = 2
-    frame_buffers: Dict[str, list] = {cam_id: [] for cam_id in camera_ids}
+    LOG_EVERY_N = 30   # Log every Nth frame to keep output clean
+    frame_buffers: dict = {cam_id: [] for cam_id in camera_ids}
 
-    # FPS Tracking State
     fps_stats = {cam_id: {"count": 0, "start_time": time.time()} for cam_id in camera_ids}
-    FPS_REPORT_INTERVAL = 10  # Print stats every 10 frames
+    FPS_REPORT_INTERVAL = 10
 
-    print(f"🔄 Aggregator started for: {list(streams.keys())} | Buffer: {BUFFER_SIZE}")
+    # Per-camera counters for logging
+    pulled_counts: dict = {cam_id: 0 for cam_id in camera_ids}
+    yielded_counts: dict = {cam_id: 0 for cam_id in camera_ids}
 
+    print(f"[app/aggregator] 🟢 Started for cameras: {camera_ids} | buffer={BUFFER_SIZE}")
     loop = asyncio.get_running_loop()
 
     while True:
         try:
             # Blocking Redis Read (Offloaded to thread)
+            # Use get_client() — .client is None until first call (lazy init)
+            r = redis_manager.get_client()
             response = await asyncio.to_thread(
-                redis_manager.client.xread,
-                streams=streams, 
-                count=1, 
+                r.xread,
+                streams=streams,
+                count=1,
                 block=100
             )
 
@@ -55,7 +56,13 @@ async def frame_aggregator(redis_manager, camera_ids: List[str]):
                         frame_id = int(frame_id_bytes.decode('utf-8')) if frame_id_bytes else -1
                     except ValueError:
                         continue
-                    
+
+                    # Log periodic Redis pulls per camera
+                    pulled_counts[camera_id] = pulled_counts.get(camera_id, 0) + 1
+                    pull_n = pulled_counts[camera_id]
+                    if pull_n % LOG_EVERY_N == 0:
+                        print(f"[app/{camera_id}] 📨 Pulled {pull_n} result frames from Redis weapon stream")
+
                     det_bytes = fields.get(b'detections')
                     detections = json.loads(det_bytes.decode('utf-8')) if det_bytes else []
                     
@@ -102,6 +109,15 @@ async def frame_aggregator(redis_manager, camera_ids: List[str]):
 
                         if len(frame_buffers[camera_id]) > BUFFER_SIZE:
                             _, sorted_frame = heapq.heappop(frame_buffers[camera_id])
+
+                            # Log periodic frame yields per camera
+                            yielded_counts[camera_id] = yielded_counts.get(camera_id, 0) + 1
+                            yield_n = yielded_counts[camera_id]
+                            if sorted_frame.get("has_threat"):
+                                print(f"[app/{camera_id}] 🚨 Yielding THREAT frame to SRS | frame_id={sorted_frame['frame_id']}")
+                            elif yield_n % LOG_EVERY_N == 0:
+                                print(f"[app/{camera_id}] 🖼️  Yielded {yield_n} annotated frames to RTMP broadcaster")
+
                             yield sorted_frame
 
                             # --- 6. FPS Calculation ---

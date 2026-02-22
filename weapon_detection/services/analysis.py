@@ -5,7 +5,7 @@ import numpy as np
 
 # Load Models
 try:
-    weapon_model = YOLO('weights/weapon/Guns-100-11m.onnx')
+    weapon_model = YOLO('weights/weapon/best_2.onnx')
     pose_model = YOLO('weights/pose/yolov11s-pose.onnx') 
 except Exception as e:
     print(f"Error loading models: {e}. Attempting to download/load defaults if possible.")

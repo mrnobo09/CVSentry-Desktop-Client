@@ -1,103 +1,99 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
-from typing import List
+import asyncio
 
-# Import your internal services
 from utils.RedisManager import redis_manager
 from services import background_processor
 
-# ---------------------------------------------------------
-# 1. Request Models (Validation)
-# ---------------------------------------------------------
-class MonitorRequest(BaseModel):
-    cameras: List[str]
+# -----------------------------------------------------------------------
+# Pattern weapon_detection watches for.
+# Main app writes to: stream:{camera_id}:weapon_group
+# We extract camera_id from that key and auto-start monitoring.
+# -----------------------------------------------------------------------
+STREAM_PATTERN = "stream:*:weapon_group"
+DISCOVERY_INTERVAL = 5   # seconds between Redis key scans
 
-# ---------------------------------------------------------
-# 2. Lifespan Manager (Startup & Shutdown)
-# ---------------------------------------------------------
+async def _auto_discover_loop():
+    """
+    Polls Redis every DISCOVERY_INTERVAL seconds for new camera streams
+    (keys matching stream:*:weapon_group) and automatically starts
+    processing for any that we haven't seen yet.
+
+    This removes the need for the main app to call /start-monitoring.
+    """
+    print("🔍 Auto-discover loop started — scanning for camera streams...")
+    while True:
+        try:
+            r = redis_manager.get_client()
+            # Scan for all existing weapon_group stream keys
+            keys = await r.keys(STREAM_PATTERN)
+            for key_bytes in keys:
+                key = key_bytes.decode("utf-8")
+                # key format: stream:{camera_id}:weapon_group
+                parts = key.split(":")
+                if len(parts) == 3:
+                    camera_id = parts[1]
+                    if camera_id not in background_processor.active_monitors:
+                        print(f"📡 Discovered new stream for camera: {camera_id} — starting monitoring")
+                        await background_processor.start_cameras([camera_id])
+        except Exception as e:
+            print(f"⚠️ Auto-discover error: {e}")
+
+        await asyncio.sleep(DISCOVERY_INTERVAL)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Handles the startup and shutdown events of the microservice.
-    """
     print("--- 🔫 Weapon Detection Service Starting ---")
-    
-    # A. Connect to Redis (Infrastructure)
+
+    # Connect to Redis
     try:
         await redis_manager.connect()
     except Exception as e:
         print(f"🚨 Critical Error: Could not connect to Redis. {e}")
-        # We don't exit here to allow the app to start and report health errors
-    
-    yield  # <--- The application runs here
-    
+
+    # Start auto-discovery loop — no HTTP trigger needed
+    discover_task = asyncio.create_task(_auto_discover_loop())
+
+    yield  # ← Application runs here
+
     print("--- 🛑 Weapon Detection Service Stopping ---")
-    
-    # B. Stop all background tasks gracefully
+
+    # Stop auto-discovery
+    discover_task.cancel()
+    try:
+        await discover_task
+    except asyncio.CancelledError:
+        pass
+
+    # Stop all camera monitors
     await background_processor.stop_all()
-    
-    # C. Close Redis Connection
+
+    # Close Redis
     await redis_manager.close()
 
-# ---------------------------------------------------------
-# 3. App Definition
-# ---------------------------------------------------------
+
 app = FastAPI(
     title="CVSentry - Weapon Detection Microservice",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# ---------------------------------------------------------
-# 4. API Routes
-# ---------------------------------------------------------
 
 @app.get("/")
 async def read_root():
     return {
         "service": "Weapon Detection",
         "status": "online",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "active_cameras": list(background_processor.active_monitors.keys()),
     }
 
-@app.post("/start-monitoring", status_code=200)
-async def start_monitoring(request: MonitorRequest):
-    """
-    Dynamically starts detection tasks for the list of cameras provided.
-    """
-    if not request.cameras:
-        raise HTTPException(status_code=400, detail="Camera list cannot be empty")
 
-    print(f"📥 Received command to START: {request.cameras}")
-    
-    await background_processor.start_cameras(request.cameras)
-    
+@app.get("/status")
+async def status():
+    """Returns currently monitored cameras (discovery is automatic)."""
     return {
-        "message": "Monitoring started",
-        "targets": request.cameras,
-        "total_active": list(background_processor.active_monitors.keys())
+        "active_cameras": list(background_processor.active_monitors.keys()),
+        "count": len(background_processor.active_monitors),
     }
-
-@app.post("/stop-monitoring", status_code=200)
-async def stop_monitoring(request: MonitorRequest):
-    """
-    Stops detection tasks for specific cameras.
-    """
-    print(f"📥 Received command to STOP: {request.cameras}")
-    
-    await background_processor.stop_cameras(request.cameras)
-    
-    return {
-        "message": "Monitoring stopped",
-        "targets": request.cameras,
-        "remaining_active": list(background_processor.active_monitors.keys())
-    }
-
-# ---------------------------------------------------------
-# Optional: Debug Entry Point
-# ---------------------------------------------------------
-# if __name__ == "__main__":
-#     import uvicorn
-#     # Run with: python weapon_detection.py
-#     uvicorn.run("weapon_detection:app", host="0.0.0.0", port=8000, reload=True)

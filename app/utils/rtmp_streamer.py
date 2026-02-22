@@ -5,32 +5,33 @@ import threading
 from queue import Queue, Empty, Full
 
 class RTMPStreamer:
-    def __init__(self, rtmp_url: str, width: int = 1280, height: int = 720, fps: int = 15):
+    def __init__(self, rtmp_url: str, fps: int = 10):
         self.rtmp_url = rtmp_url
         self.fps = fps
         self.frame_interval = 1.0 / fps
         self.process = None
         self.running = False
-        
-        # Buffer: Holds frames to smooth out bursts
-        self.frame_queue = Queue(maxsize=3)  
+
+        # Small queue — drop oldest when full to stay live
+        self.frame_queue = Queue(maxsize=2)
         self.writer_thread = None
-        
-        # FFmpeg Command
-        # -bufsize and -maxrate are critical for low-fps streaming stability
+
+        # FFmpeg command
+        # Input: JPEG pipe from frame_aggregator (already 640px wide)
+        # Output: 360p H.264 at low bitrate → SRS RTMP
         command_str = (
             f"ffmpeg -y "
-            # --- CRITICAL INPUT LATENCY FLAGS ---
-            f"-fflags nobuffer -probesize 32 -analyzeduration 0 " 
-            # ------------------------------------
+            f"-fflags nobuffer -probesize 32 -analyzeduration 0 "
             f"-f image2pipe -vcodec mjpeg -r {fps} -i - "
+            f"-vf scale=-2:360 "                      # Scale to 360p, keep aspect ratio
             f"-c:v libx264 -preset ultrafast -tune zerolatency "
-            f"-pix_fmt yuv420p -g {fps*2} -b:v 1000k -maxrate 1000k -bufsize 1500k "
-            f"-flush_packets 1 " # Forces immediate output
+            f"-pix_fmt yuv420p -g {fps * 2} "
+            f"-b:v 400k -maxrate 400k -bufsize 600k "  # ~60% less bandwidth vs 1000k
+            f"-flush_packets 1 "
             f"-f flv {rtmp_url}"
         )
         self.command = shlex.split(command_str)
-    
+
     def start(self):
         if self.process is not None:
             return

@@ -14,18 +14,20 @@ active_monitors: Dict[str, dict] = {}
 CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 GROUP_SUFFIX = "weapon_group"
-CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}" 
+CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}"
+
+# Log every Nth frame to avoid console spam
+LOG_EVERY_N_FRAMES = 30
 
 async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
     """
     Fetches frames from Redis Input Stream for processing.
     """
     input_stream = f"stream:{camera_id}:{GROUP_SUFFIX}"
-    
-    # Ensure Consumer Group exists
     await redis_manager.ensure_group(input_stream, GROUP_SUFFIX)
-    
-    print(f"[{camera_id}] Fetch task started as Consumer: {CONSUMER_ID}")
+    print(f"[weapon/{camera_id}] 🟢 Fetch task started (consumer: {CONSUMER_ID})")
+
+    frames_received = 0
 
     while True:
         try:
@@ -34,23 +36,19 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                 group_name=GROUP_SUFFIX,
                 consumer_name=CONSUMER_ID
             )
-            
-            if not msgs: 
+
+            if not msgs:
                 continue
 
             _, entries = msgs[0]
             for msg_id_bytes, fields in entries:
                 msg_id = msg_id_bytes.decode('utf-8') if isinstance(msg_id_bytes, bytes) else msg_id_bytes
-                
-                # We still need to READ the frame to analyze it
+
                 frame_bytes = fields.get(b'frame_data')
                 frame_id_bytes = fields.get(b'frame_id')
-                
-                # Only frame_id is strictly needed for the output
                 frame_id = frame_id_bytes.decode('utf-8') if frame_id_bytes else None
 
-                if frame_bytes is None: 
-                    # Ack bad message so it doesn't get stuck
+                if frame_bytes is None:
                     await redis_manager.ack_message(input_stream, GROUP_SUFFIX, [msg_id])
                     continue
 
@@ -58,17 +56,21 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
                 if frame is not None:
+                    frames_received += 1
+                    if frames_received % LOG_EVERY_N_FRAMES == 0:
+                        print(f"[weapon/{camera_id}] 📥 Pulled {frames_received} frames from Redis (latest frame_id={frame_id})")
+
                     if queue.full():
                         try: queue.get_nowait()
                         except asyncio.QueueEmpty: pass
-                
+
                     await queue.put((frame, frame_id, msg_id))
 
         except asyncio.CancelledError:
-            print(f"[{camera_id}] Fetch task stopped.")
+            print(f"[weapon/{camera_id}] 🛑 Fetch task stopped (total frames received: {frames_received}).")
             break
         except Exception as e:
-            print(f"[{camera_id}] Fetch Error: {e}")
+            print(f"[weapon/{camera_id}] ❌ Fetch Error: {e}")
             await asyncio.sleep(1)
 
 
@@ -76,58 +78,60 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
     """
     Analyzes frames and pushes ONLY metadata (detections) to the result stream.
     """
-    print(f"[{camera_id}] Analysis task started.")
+    print(f"[weapon/{camera_id}] 🟢 Analysis task started.")
     loop = asyncio.get_running_loop()
     input_stream_name = f"stream:{camera_id}:{GROUP_SUFFIX}"
+
+    frames_processed = 0
+    clean_frames = 0
 
     while True:
         try:
             data_package = await queue.get()
             frame, frame_id, msg_id = data_package
-            
-            # Analyze frame (CPU intensive)
-            # We ignore the returned 'frame' since we aren't sending it back
-            # Analyze frame (CPU intensive)
+
             detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
                 ANALYZER.analyze_frame,
                 frame
             )
-            # analyze_frame now returns just list[dict]
-            # No need to unpack (frame, detections)
 
-            # --- OUTPUT LOGIC ---
-            # Only proceed if we have valid data
             if frame_id:
-                detections_json = json.dumps(detections)
+                frames_processed += 1
                 det_count = len(detections)
-                
-                # Prepare Metadata Payload (NO IMAGES)
+                has_threat = bool(detections)
+
+                if has_threat:
+                    # Always log threats immediately
+                    threat_labels = [d.get('class_name', '?') for d in detections]
+                    print(f"[weapon/{camera_id}] 🚨 THREAT detected | frame={frame_id} | count={det_count} | labels={threat_labels}")
+                    clean_frames = 0
+                else:
+                    clean_frames += 1
+                    if clean_frames % LOG_EVERY_N_FRAMES == 0:
+                        print(f"[weapon/{camera_id}] ✅ Processed {frames_processed} frames | last {clean_frames} clean (no detections)")
+
                 payload = {
                     "frame_id": frame_id,
-                    "detections": detections_json,
+                    "detections": json.dumps(detections),
                     "detections_count": str(det_count),
-                    "has_threat": str(bool(detections)),
+                    "has_threat": str(has_threat),
                     "worker_id": CONSUMER_ID
                 }
-                
-                # Push ONLY metadata to the result stream
-                # Using client.xadd directly to avoid any image-wrapper logic in push_frame
+
                 await redis_manager.client.xadd(
                     name=f"weapon:{camera_id}",
                     fields=payload
                 )
-
-                # ACK input message
                 await redis_manager.ack_message(input_stream_name, GROUP_SUFFIX, [msg_id])
-            
+
             await asyncio.sleep(0)
 
         except asyncio.CancelledError:
-            print(f"[{camera_id}] Analysis task stopped.")
+            print(f"[weapon/{camera_id}] 🛑 Analysis task stopped (total processed: {frames_processed}).")
             break
         except Exception as e:
-            print(f"[{camera_id}] Analysis Error: {e}")
+            print(f"[weapon/{camera_id}] ❌ Analysis Error: {e}")
             await asyncio.sleep(1)
 
 

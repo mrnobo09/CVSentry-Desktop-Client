@@ -6,9 +6,11 @@ import io
 from typing import Dict, Optional
 
 
-# Paremeters To Tune Performance 
-FRAME_SKIP = 2  
-JPEG_QUALITY = 50  
+# Parameters to tune performance
+FRAME_SKIP = 3          # Keep 1 in every N frames  (higher = fewer frames, less CPU/Redis load)
+JPEG_QUALITY = 60       # JPEG encode quality (50-75 is a good range)
+INFER_RESOLUTION = 640  # Long-edge cap before pushing to Redis (matches YOLO training size)
+
 
 class AVHandler:
     def __init__(self):
@@ -87,11 +89,18 @@ class AVHandler:
                     if frame_counter % FRAME_SKIP != 0:
                         continue  
 
-                    # JPEG Encoding
+                    # Decode frame → PIL
                     pil_img = frame.to_image()
+
+                    # Resize to inference resolution (640px long edge) — saves Redis + YOLO
+                    pil_img.thumbnail((INFER_RESOLUTION, INFER_RESOLUTION))
+
+                    # JPEG Encoding
                     with io.BytesIO() as buffer:
                         pil_img.save(buffer, format='jpeg', quality=JPEG_QUALITY)
                         img_bytes = buffer.getvalue()
+
+
 
                     # Keep queue fresh
                     if frame_queue.full():

@@ -10,11 +10,18 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<mpegts.Player | null>(null);
 
   const getStreamUrl = (id: string) => {
+    // Route through FastAPI auth proxy instead of direct SRS connection
+    const fastapiBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8001';
+    const token = localStorage.getItem('access_token') || '';
+    if (token) {
+      return `${fastapiBase}/stream/${id}.flv?token=${encodeURIComponent(token)}`;
+    }
+    // Fallback: direct SRS (no auth)
     const baseUrl = import.meta.env.VITE_BASE_RTMP_URL || 'http://localhost:8080/live';
     const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     return `${cleanBase}/${id}.flv`;
@@ -32,7 +39,7 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
     const initPlayer = async () => {
       try {
         const url = getStreamUrl(cam_id);
-        
+
         player = mpegts.createPlayer({
           type: 'flv',
           url: url,
@@ -44,18 +51,18 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
           enableStashBuffer: false,
           stashInitialSize: 128,
         });
-        
+
         playerRef.current = player;
 
         if (videoRef.current && isMounted) {
           player.attachMediaElement(videoRef.current);
           player.load();
-          
+
           try {
             await player.play();
             if (isMounted) {
-                setIsConnected(true);
-                setIsLoading(false);
+              setIsConnected(true);
+              setIsLoading(false);
             }
           } catch (playError) {
             if (isMounted && videoRef.current) {
@@ -78,12 +85,12 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
     initPlayer();
 
     if (player) {
-        (player as mpegts.Player).on(mpegts.Events.ERROR, (errType, errDetail) => {
-            if (!isMounted) return;
-            if (errType !== mpegts.ErrorTypes.NETWORK_ERROR) {
-                console.error('Player Error:', errType, errDetail);
-            }
-        });
+      (player as mpegts.Player).on(mpegts.Events.ERROR, (errType, errDetail) => {
+        if (!isMounted) return;
+        if (errType !== mpegts.ErrorTypes.NETWORK_ERROR) {
+          console.error('Player Error:', errType, errDetail);
+        }
+      });
     }
 
     return () => {
@@ -130,7 +137,7 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
             </p>
           </div>
         </div>
-        
+
         <button
           onClick={handleFullscreen}
           disabled={!isConnected}
@@ -143,37 +150,37 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
 
       <div className="relative bg-black aspect-video flex items-center justify-center">
         <video
-            ref={videoRef}
-            className="w-full h-full object-contain"
-            controls={false}
-            playsInline
-            muted={true}
+          ref={videoRef}
+          className="w-full h-full object-contain"
+          controls={false}
+          playsInline
+          muted={true}
         />
 
         {isLoading && !error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
             <div className="text-gray-300 text-center">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                <p className="text-xs uppercase tracking-widest">Buffering...</p>
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-2"></div>
+              <p className="text-xs uppercase tracking-widest">Buffering...</p>
             </div>
-            </div>
+          </div>
         )}
 
         {error && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-gray-900/90 z-20">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 bg-gray-900/90 z-20">
             <AlertCircle className="w-12 h-12 mb-2" />
             <p className="text-sm font-semibold">{error}</p>
             <p className="text-xs text-gray-500 mt-1">Check media server</p>
-            </div>
+          </div>
         )}
 
         {!isConnected && !isLoading && !error && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-600 z-10">
+          <div className="absolute inset-0 flex items-center justify-center text-gray-600 z-10">
             <div className="text-center">
-                <WifiOff className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Signal Lost</p>
+              <WifiOff className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Signal Lost</p>
             </div>
-            </div>
+          </div>
         )}
       </div>
     </div>
