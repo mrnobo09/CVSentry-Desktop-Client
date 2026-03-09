@@ -13,7 +13,6 @@ class RedisManager:
     GROUPS = {
         "faces": "face_group",
         "weapons": "weapon_group",
-        "postures": "posture_group",
     }
 
     def __init__(self):

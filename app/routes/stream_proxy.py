@@ -8,7 +8,8 @@ import jwt
 load_dotenv()
 
 DJANGO_SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "crazysupersecretkey")
-SRS_BASE_URL = f"http://localhost:{os.getenv('NODE_SRS_PORT', '8080')}/live"
+SRS_HTTP_PORT = os.getenv("SRS_HTTP_PORT", "8080")
+SRS_BASE_URL = f"http://localhost:{SRS_HTTP_PORT}/live"
 
 router = APIRouter()
 

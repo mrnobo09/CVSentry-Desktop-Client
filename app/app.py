@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from routes.camera_routes import router as camera_routes
 from routes.node_routes import router as node_routes, send_heartbeat, mark_offline
 from routes.stream_proxy import router as stream_proxy
+from routes.webrtc_routes import router as webrtc_routes
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,6 +53,7 @@ app.add_middleware(
 app.include_router(camera_routes, prefix="/cameras")
 app.include_router(node_routes, prefix="/node")
 app.include_router(stream_proxy)   # /stream/{camera_id}.flv
+app.include_router(webrtc_routes)  # /webrtc/{camera_id}/whep
 
 
 @app.get("/")

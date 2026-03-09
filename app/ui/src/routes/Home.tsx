@@ -4,8 +4,9 @@ import request from '../utils/request';
 import CameraInfo from '../components/CameraInfo';
 import type { Cameras, Camera, CameraStream } from '../types/CameraTypes';
 import {
-  PlayCircle, Database, Loader2, RefreshCw, PlusCircle, X, Wifi
+  PlayCircle, Database, Loader2, RefreshCw, PlusCircle, X, Wifi, LogOut
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 // Internal type for UI rendering (includes the ID key)
 interface CameraWithId extends Camera {
@@ -113,6 +114,7 @@ function AddCameraModal({ onClose, onAdd }: AddCameraModalProps) {
 // --- Main Home Component ---
 export default function Home() {
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const [allCameras, setAllCameras] = useState<CameraWithId[]>([]);
   const [selectedCameras, setSelectedCameras] = useState<Cameras>({});
@@ -231,6 +233,14 @@ export default function Home() {
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               {isRefreshing ? 'Scanning...' : 'Re-scan'}
+            </button>
+            <button
+              onClick={logout}
+              title="Log Out"
+              className="flex items-center gap-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/40 text-red-400 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Log Out
             </button>
             <button
               onClick={() => setShowAddModal(true)}

@@ -1,52 +1,43 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { StopCircle, Grid3x3, AlertTriangle } from 'lucide-react';
+import { StopCircle, Grid3x3 } from 'lucide-react';
 import CameraFeed from '../components/CameraFeed';
+import ThreatOverlay from '../components/ThreatOverlay';
+import { useAlerts } from '../hooks/useAlerts';
+import request from '../utils/request';
 import type { CameraStream } from '../types/CameraTypes';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
 
 export default function CameraStreams() {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Extract cameraIds from location state using CameraStream type
   const state = location.state as CameraStream | null;
   const cameraIds = state?.cameraIds || [];
   
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [isStopping, setIsStopping] = useState(false);
 
-  // Handle stopping all analysis
+  // Alert polling
+  const { latestAlert, clearLatest } = useAlerts();
+
   const handleStopAnalysis = async () => {
     if (isStopping) return;
     
     setIsStopping(true);
     setIsAnalyzing(false);
-    console.log('Stopping analysis on all cameras...');
 
     try {
-      await fetch(`${BACKEND_URL}/cameras/stop`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ cameras: cameraIds }),
-      });
-      console.log('Backend workers stopped successfully');
+      await request.post('/cameras/stop', { cameras: cameraIds });
     } catch (error) {
       console.error('Failed to stop backend analysis:', error);
-      // We continue to navigate even if the API fails, to not trap the user
     }
 
-    // Navigate back to home
     navigate('/');
   };
 
   if (cameraIds.length === 0) {
     return (
       <div className="flex flex-col justify-center items-center h-screen bg-gray-900 text-white gap-4">
-        <AlertTriangle className="w-12 h-12 text-yellow-500" />
         <p className="text-xl">No cameras selected for streaming.</p>
         <button
           onClick={() => navigate('/')}
@@ -60,6 +51,15 @@ export default function CameraStreams() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-8">
+      {/* Threat overlay — shown on top whenever a new alert fires */}
+      {latestAlert && (
+        <ThreatOverlay
+          key={latestAlert.id}
+          alert={latestAlert}
+          onDismiss={clearLatest}
+        />
+      )}
+
       <div className="max-w-full mx-auto">
         {/* Header */}
         <header className="mb-8">
@@ -90,7 +90,7 @@ export default function CameraStreams() {
             className={`flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-lg font-semibold shadow-md transition-all duration-200 ${
               isStopping 
                 ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                : 'bg-red-600 text-white hover:bg-red-700 hover:shadow-red-900/20'
+                : 'bg-red-600 text-white hover:bg-red-700'
             }`}
           >
             {isStopping ? (
@@ -107,7 +107,7 @@ export default function CameraStreams() {
         {/* Camera Feed Grid */}
         <div className={`grid gap-6 ${
           cameraIds.length === 1 
-            ? 'grid-cols-1 max-w-4xl mx-auto' // Centers the single feed
+            ? 'grid-cols-1 max-w-4xl mx-auto'
             : cameraIds.length === 2
             ? 'grid-cols-1 lg:grid-cols-2'
             : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'

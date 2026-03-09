@@ -5,10 +5,12 @@ from services.analyzer import AnalyzeCameraStreams
 from services.rtmp_service import start_rtmp_broadcasting
 from dependencies.auth import verify_token
 from routes.node_routes import notify_cameras_active, re_register_node
+from pydantic import BaseModel
 import asyncio
 
 router = APIRouter()
 
+active_rtmp_task = None
 
 @router.get("/list")
 async def list_cameras(payload=Depends(verify_token)):
@@ -31,6 +33,7 @@ async def start_camera_analysis(cameras: Cameras, payload=Depends(verify_token))
     Weapon detection starts automatically — it polls Redis for
     stream:*:weapon_group keys and self-activates.
     """
+    global active_rtmp_task
     cameras_dict = cameras.root
     camera_ids = list(cameras_dict.keys())
 
@@ -46,10 +49,33 @@ async def start_camera_analysis(cameras: Cameras, payload=Depends(verify_token))
 
     # Start RTMP broadcasting (aggregator → FFmpeg → SRS)
     print(f"🎥 Starting RTMP Service for {len(camera_ids)} cameras...")
-    asyncio.create_task(start_rtmp_broadcasting(camera_ids))
+    if active_rtmp_task and not active_rtmp_task.done():
+        active_rtmp_task.cancel()
+    active_rtmp_task = asyncio.create_task(start_rtmp_broadcasting(camera_ids))
 
     return {
         "status": "System started",
         "details": f"Analyzing and Streaming {len(camera_ids)} cameras.",
         "note": "Weapon detection picks up streams automatically via Redis discovery."
     }
+
+
+class StopPayload(BaseModel):
+    cameras: list[str]
+
+@router.post("/stop")
+async def stop_camera_analysis(payload: StopPayload, token=Depends(verify_token)):
+    """Stops analysis for the provided cameras."""
+    global active_rtmp_task
+    from services.analyzer import global_av_handler
+
+    for cid in payload.cameras:
+        await global_av_handler.stop_pipeline(cid)
+    
+    if active_rtmp_task and not active_rtmp_task.done():
+        active_rtmp_task.cancel()
+        active_rtmp_task = None
+
+    await notify_cameras_active([], reason="analysis stopped")
+
+    return {"status": "Analysis stopped"}

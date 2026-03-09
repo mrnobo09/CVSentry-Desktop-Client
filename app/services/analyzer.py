@@ -9,13 +9,15 @@ from routes.node_routes import notify_cameras_active
 LOG_EVERY_N_FRAMES = 30
 
 
+global_av_handler = AVHandler()
+
 async def AnalyzeCameraStreams(cameras: Cameras):
     """Analyze camera streams asynchronously."""
+    global global_av_handler
     for camera_id, camera_info in cameras.items():
         rtsp_url = camera_info.rtsp_url
         print(f"[app/{camera_id}] 🎬 Starting RTSP ingestion from {rtsp_url}")
-        av_manager = AVHandler()
-        asyncio.create_task(CameraWorker(camera_id, rtsp_url, av_manager))
+        asyncio.create_task(CameraWorker(camera_id, rtsp_url, global_av_handler))
 
 
 async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
@@ -26,7 +28,7 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
         frames_pushed = 0
         first_frame_notified = False  # Only notify Django once per camera
 
-        while True:
+        while avhandler.running.get(camera_id, False):
             frame = avhandler.get_frame(camera_id)
             if frame is not None:
                 frame_id = rdb.get_frame_id(camera_id)
@@ -51,6 +53,8 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
 
             await asyncio.sleep(0.001)
 
+    except asyncio.CancelledError:
+        print(f"[app/{camera_id}] 🛑 CameraWorker task cancelled")
     except Exception as e:
         print(f"[app/{camera_id}] ❌ Pipeline failed: {e}")
 

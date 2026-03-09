@@ -222,3 +222,38 @@ async def notify_cameras_active(camera_ids: list[str], reason: str = ""):
         print(f"[node] ❌ Failed to update cameras: {e}")
 
 
+async def send_threat_alert(camera_id: str, frame_id: int, identities: list, alert_type: str = "COMBINED_THREAT"):
+    """
+    POSTs a threat alert to Django.
+
+    Django endpoint: POST /alerts/create/
+    """
+    token = _node_state.get("access_token")
+    local_ip = _node_state.get("local_ip")
+    if not token or not local_ip:
+        print(f"[node] ⚠️  send_threat_alert skipped — node not registered")
+        return
+
+    import datetime
+    payload = {
+        "camera_id":  camera_id,
+        "frame_id":   str(frame_id),
+        "identities": identities,
+        "alert_type": alert_type,
+        "node_ip":    local_ip,
+        "timestamp":  datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+    def _post():
+        return requests.post(
+            f"{DJANGO_URL}/alerts/create/",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+
+    try:
+        await _asyncio.to_thread(_post)
+        print(f"[node] 🚨 Threat alert ({alert_type}) sent to Django | camera={camera_id} | identities={identities}")
+    except Exception as e:
+        print(f"[node] ❌ Failed to send threat alert: {e}")

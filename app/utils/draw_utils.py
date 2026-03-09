@@ -54,6 +54,18 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                     color = (255, 255, 0) # Cyan/Yellow for normal person
             elif label in ["pistol", "rifle", "knife", "weapon"]: # Check your model class names
                 color = (0, 0, 255) # Red for weapon itself
+            # ---- Face detection labels ----
+            elif label == "COMBINED_THREAT":
+                color = (0, 0, 220) # Deep red — armed recognized suspect
+                identity = det.get("identity") or "Unknown"
+                label = f"⚠️ ARMED SUSPECT: {identity}"
+            elif label == "known_face":
+                color = (0, 220, 100) # Green — recognized face
+                identity = det.get("identity") or "?"
+                rec_conf = det.get("rec_confidence", 0.0)
+                label = f"{identity} ({rec_conf:.2f})"
+            elif label == "face":
+                color = (200, 200, 0) # Cyan-grey — unknown face
             
             # DRAW SKELETON
             if keypoints:
@@ -92,24 +104,31 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                 # Cast to int for OpenCV
                 x1, y1, x2, y2 = map(int, box)
 
-                # Draw Rectangle (using x1, y1, x2, y2 directly)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                # Combined threat: draw thicker, flashing-style double border
+                if det.get("class_name") == "COMBINED_THREAT":
+                    cv2.rectangle(frame, (x1 - 4, y1 - 4), (x2 + 4, y2 + 4), (0, 0, 180), 4)
 
-                # Prepare Label
-                label_text = f"{label} {score:.2f}"
+                # Draw Rectangle
+                thickness = 3 if det.get("class_name") in ("COMBINED_THREAT", "known_face") else 2
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+
+                # Prepare Label — face/known_face labels are already formatted above
+                if det.get("class_name") in ("face", "known_face", "COMBINED_THREAT"):
+                    label_text = label  # already includes identity / score
+                else:
+                    label_text = f"{label} {score:.2f}"
                 
                 # Calculate Text Size for background box
-                (text_w, text_h), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                font_scale = 0.55 if det.get("class_name") == "COMBINED_THREAT" else 0.5
+                (text_w, text_h), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
                 
-                # Draw Text Background (Filled Rectangle)
-                # Ensure background doesn't go off-screen if y1 is near top
+                # Draw Text Background
                 text_y_start = max(y1 - 20, 0)
                 cv2.rectangle(frame, (x1, text_y_start), (x1 + text_w, text_y_start + 20), color, -1)
                 
                 # Draw Text
-                # Align text inside the background box
                 cv2.putText(frame, label_text, (x1, text_y_start + 15), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1)
 
         # 3. Encode Numpy Array -> Bytes (JPEG)
         # Quality 70 keeps streams fast and light
