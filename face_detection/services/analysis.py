@@ -42,10 +42,25 @@ class FaceAnalyzer:
         print("[face] 🚀 Loading InsightFace buffalo_s model...")
         self.app = FaceAnalysis(
             name="buffalo_s",
-            providers=["OpenVINOExecutionProvider"]
+            providers=["CUDAExecutionProvider", "OpenVINOExecutionProvider", "CPUExecutionProvider"]
         )
         self.app.prepare(ctx_id=0, det_size=(640, 640))
-        print("[face] ✅ InsightFace model ready.")
+        
+        # Determine the active executor used by the underlying ONNXSession
+        try:
+            model_name = list(self.app.models.keys())[0]
+            providers = self.app.models[model_name].session.get_providers()
+            active_provider = providers[0] if providers else "UnknownProvider"
+            
+            # Make the log friendly
+            if "CUDA" in active_provider:
+                print(f"[face] ✅ InsightFace model ready. Executor: CUDA")
+            elif "OpenVINO" in active_provider:
+                print(f"[face] ✅ InsightFace model ready. Executor: OpenVINO")
+            else:
+                print(f"[face] ✅ InsightFace model ready. Executor: CPU ({active_provider})")
+        except Exception:
+            print("[face] ✅ InsightFace model ready.")
 
         # Dict: identity_name (str) -> averaged_embedding (np.ndarray, shape 512)
         self.known_embeddings: dict = self._load_known_faces()

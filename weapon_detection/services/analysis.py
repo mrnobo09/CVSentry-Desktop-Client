@@ -2,17 +2,28 @@ from ultralytics import YOLO
 import cv2
 import math
 import numpy as np
+import torch
 
 # Load Models
 try:
-    # Attempt to load OpenVINO optimized models first
-    weapon_model = YOLO('weights/weapon/best_2_openvino_model')
-    pose_model = YOLO('weights/pose/yolo11s-pose_openvino_model') 
+    if torch.cuda.is_available():
+        print("[weapon] 🚀 CUDA is available. Executor: CUDA")
+        weapon_model = YOLO('weights/weapon/best_2.onnx')
+        pose_model = YOLO('weights/pose/yolo11s-pose.onnx')
+        INFERENCE_DEVICE = 0
+    else:
+        print("[weapon] ⚡ CUDA not found. Attempting to load OpenVINO optimized models. Executor: OpenVINO")
+        # Note: Ultralytics uses the format of the loaded model path to trigger OpenVINO. 
+        # When an OpenVINO model is loaded, passing device="cpu" tells the OpenVINO backend to run on the CPU.
+        weapon_model = YOLO('weights/weapon/best_2_openvino_model')
+        pose_model = YOLO('weights/pose/yolo11s-pose_openvino_model') 
+        INFERENCE_DEVICE = "cpu"
 except Exception as e:
-    print(f"⚠️ OpenVINO models not found. Loading fallback ONNX models. {e}")
-    # Fallback to standard ONNX models
+    print(f"[weapon] 💻 Primary models failed to load. Loading fallback ONNX models. Executor: CPU ({e})")
+    # Fallback to standard ONNX models (runs on CPU)
     weapon_model = YOLO('weights/weapon/best_2.onnx')
     pose_model = YOLO('weights/pose/yolo11s-pose.onnx')
+    INFERENCE_DEVICE = "cpu"
 
 class FrameAnalyzer:
     def __init__(self, skip_frames: int = 0):
@@ -41,11 +52,11 @@ class FrameAnalyzer:
         self.counter = 0
 
         # 1. Run Weapon Detection
-        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.7, iou=0.5, max_det=50)
+        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.7, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
         
         # 2. Run Pose Estimation
         # Using a lower conf for pose to ensure we catch people even if partially occluded
-        pose_results = pose_model.predict(source=frame, verbose=False, conf=0.5)
+        pose_results = pose_model.predict(source=frame, verbose=False, conf=0.5, device=INFERENCE_DEVICE)
 
         detections = []
         
