@@ -15,6 +15,14 @@ REDIS_CONF = {
     "decode_responses": False
 }
 
+redis_username = os.environ.get("REDIS_USERNAME")
+if redis_username:
+    REDIS_CONF["username"] = redis_username
+
+redis_password = os.environ.get("REDIS_PASSWORD")
+if redis_password:
+    REDIS_CONF["password"] = redis_password
+
 class RedisManager:
     _instance: Optional["RedisManager"] = None
 

@@ -6,6 +6,8 @@ class RedisManager:
 
     REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6379)) 
+    REDIS_USERNAME = os.getenv("REDIS_USERNAME", None)
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
     MAX_FRAMES_PER_CYCLE = 100000
     
     STREAM_MAXLEN = 1000 
@@ -22,12 +24,20 @@ class RedisManager:
     def get_client(self) -> redis.Redis:
         if self.client is None:
             if self.pool is None:
-                self.pool = redis.ConnectionPool(
-                    host=self.REDIS_HOST, 
-                    port=self.REDIS_PORT, 
-                    decode_responses=False, # Crucial for images (binary data)
-                    max_connections=50      
-                )
+                pool_kwargs = {
+                    "host": self.REDIS_HOST,
+                    "port": self.REDIS_PORT,
+                    "decode_responses": False, # Crucial for images (binary data)
+                    "max_connections": 50
+                }
+                
+                # Only add auth if provided to avoid connection errors if backend doesn't require it
+                if self.REDIS_USERNAME:
+                    pool_kwargs["username"] = self.REDIS_USERNAME
+                if self.REDIS_PASSWORD:
+                    pool_kwargs["password"] = self.REDIS_PASSWORD
+                    
+                self.pool = redis.ConnectionPool(**pool_kwargs)
             self.client = redis.Redis(connection_pool=self.pool)
         
         return self.client

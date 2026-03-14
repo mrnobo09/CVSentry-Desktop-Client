@@ -19,12 +19,24 @@ load_dotenv()
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+REDIS_USERNAME = os.environ.get("REDIS_USERNAME", None)
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", None)
+
 CAMERAS = ["cam_1"]
 
 # -----------------------------
 # Redis connection
 # -----------------------------
-r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
+redis_kwargs = {
+    "host": REDIS_HOST,
+    "port": REDIS_PORT,
+}
+if REDIS_USERNAME:
+    redis_kwargs["username"] = REDIS_USERNAME
+if REDIS_PASSWORD:
+    redis_kwargs["password"] = REDIS_PASSWORD
+
+r = redis.Redis(**redis_kwargs)
 
 # -----------------------------
 # Queues for frames
