@@ -42,7 +42,7 @@ class FaceAnalyzer:
         print("[face] 🚀 Loading InsightFace buffalo_s model...")
         self.app = FaceAnalysis(
             name="buffalo_s",
-            providers=["CPUExecutionProvider"]
+            providers=["OpenVINOExecutionProvider"]
         )
         self.app.prepare(ctx_id=0, det_size=(640, 640))
         print("[face] ✅ InsightFace model ready.")

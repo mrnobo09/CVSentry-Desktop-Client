@@ -1,17 +1,19 @@
 import asyncio
-import cv2
 import numpy as np
 import json
 import uuid 
 from typing import List, Dict
 from services.analysis import FrameAnalyzer
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from utils.RedisManager import redis_manager 
+from turbojpeg import TurboJPEG
+
+jpeg = TurboJPEG()
 
 ANALYZER = FrameAnalyzer(skip_frames=2)
 
 active_monitors: Dict[str, dict] = {}
-CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+CPU_EXECUTOR = ProcessPoolExecutor(max_workers=4)
 
 GROUP_SUFFIX = "weapon_group"
 CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}"
@@ -52,8 +54,8 @@ async def fetch_frames_task(camera_id: str, queue: asyncio.Queue):
                     await redis_manager.ack_message(input_stream, GROUP_SUFFIX, [msg_id])
                     continue
 
-                np_arr = np.frombuffer(frame_bytes, np.uint8)
-                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                # Use TurboJPEG for faster decoding
+                frame = jpeg.decode(frame_bytes)
 
                 if frame is not None:
                     frames_received += 1

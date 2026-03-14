@@ -4,6 +4,10 @@ import threading
 import queue
 import io
 from typing import Dict, Optional
+from av.video.reformatter import VideoReformatter
+from turbojpeg import TurboJPEG
+
+jpeg = TurboJPEG()
 
 
 # Parameters to tune performance
@@ -89,16 +93,19 @@ class AVHandler:
                     if frame_counter % FRAME_SKIP != 0:
                         continue  
 
-                    # Decode frame → PIL
-                    pil_img = frame.to_image()
+                    # Downscale to 640x480 and convert to BGR24 using PyAV Reformatter
+                    if not hasattr(self, 'reformatters'):
+                        self.reformatters = {}
+                    if camera_id not in self.reformatters:
+                        self.reformatters[camera_id] = VideoReformatter()
+                    
+                    frame_bgr = self.reformatters[camera_id].reformat(frame, width=640, height=480, format='bgr24')
+                    
+                    # Convert to numpy array
+                    img_array = frame_bgr.to_ndarray(format='bgr24')
 
-                    # Resize to inference resolution (640px long edge) — saves Redis + YOLO
-                    pil_img.thumbnail((INFER_RESOLUTION, INFER_RESOLUTION))
-
-                    # JPEG Encoding
-                    with io.BytesIO() as buffer:
-                        pil_img.save(buffer, format='jpeg', quality=JPEG_QUALITY)
-                        img_bytes = buffer.getvalue()
+                    # JPEG Encoding with PyTurboJPEG
+                    img_bytes = jpeg.encode(img_array, quality=JPEG_QUALITY)
 
 
 

@@ -5,6 +5,9 @@ import time
 from typing import List, Dict, Any
 from utils.frame_cache import frame_cache
 from utils.draw_utils import draw_detections
+from concurrent.futures import ProcessPoolExecutor
+
+PROCESS_POOL = ProcessPoolExecutor(max_workers=4)
 
 
 def _check_combined_threat(weapon_dets: list, face_dets: list) -> bool:
@@ -193,10 +196,10 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                     if has_combined_threat:
                         combined_dets += _build_combined_threat_detections(detections, face_dets)
 
-                    # Draw (offloaded to thread pool)
+                    # Draw (offloaded to process pool)
                     if combined_dets:
                         annotated_frame_bytes = await loop.run_in_executor(
-                            None,
+                            PROCESS_POOL,
                             draw_detections,
                             raw_frame_bytes,
                             combined_dets

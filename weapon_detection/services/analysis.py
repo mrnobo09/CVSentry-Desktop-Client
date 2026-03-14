@@ -5,15 +5,14 @@ import numpy as np
 
 # Load Models
 try:
-    weapon_model = YOLO('weights/weapon/best_2.onnx')
-    pose_model = YOLO('weights/pose/yolov11s-pose.onnx') 
+    # Attempt to load OpenVINO optimized models first
+    weapon_model = YOLO('weights/weapon/best_2_openvino_model')
+    pose_model = YOLO('weights/pose/yolo11s-pose_openvino_model') 
 except Exception as e:
-    print(f"Error loading models: {e}. Attempting to download/load defaults if possible.")
-    # Fallback or re-raise depending on strictness. 
-    # For now, we assume files exist or Ultralytics will auto-download if passed a .pt name
-    # But user specifically asked for .onnx, so we expect them to be there.
-    # If not found, this will crash, which is better than failing silently.
-    raise e
+    print(f"⚠️ OpenVINO models not found. Loading fallback ONNX models. {e}")
+    # Fallback to standard ONNX models
+    weapon_model = YOLO('weights/weapon/best_2.onnx')
+    pose_model = YOLO('weights/pose/yolo11s-pose.onnx')
 
 class FrameAnalyzer:
     def __init__(self, skip_frames: int = 0):
@@ -42,11 +41,11 @@ class FrameAnalyzer:
         self.counter = 0
 
         # 1. Run Weapon Detection
-        weapon_results = weapon_model.predict(source=frame, verbose=False, device='cpu', conf=0.7, iou=0.5, max_det=50)
+        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.7, iou=0.5, max_det=50)
         
         # 2. Run Pose Estimation
         # Using a lower conf for pose to ensure we catch people even if partially occluded
-        pose_results = pose_model.predict(source=frame, verbose=False, device='cpu', conf=0.5)
+        pose_results = pose_model.predict(source=frame, verbose=False, conf=0.5)
 
         detections = []
         

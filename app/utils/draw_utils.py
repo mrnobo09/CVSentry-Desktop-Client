@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Optional
+from turbojpeg import TurboJPEG
 
 def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Optional[bytes]:
     """
@@ -11,9 +12,10 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
         return None
 
     try:
-        # 1. Decode Bytes -> Numpy Array (OpenCV Image)
-        nparr = np.frombuffer(frame_bytes, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        jpeg = TurboJPEG()
+        
+        # 1. Decode Bytes -> Numpy Array (OpenCV Image) using TurboJPEG
+        frame = jpeg.decode(frame_bytes)
 
         if frame is None:
             return None
@@ -130,10 +132,9 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                 cv2.putText(frame, label_text, (x1, text_y_start + 15), 
                             cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1)
 
-        # 3. Encode Numpy Array -> Bytes (JPEG)
+        # 3. Encode Numpy Array -> Bytes (JPEG) using TurboJPEG
         # Quality 70 keeps streams fast and light
-        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        return buffer.tobytes()
+        return jpeg.encode(frame, quality=70)
 
     except Exception as e:
         print(f"⚠️ Error drawing detections: {e}")
