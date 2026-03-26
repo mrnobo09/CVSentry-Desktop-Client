@@ -1,6 +1,9 @@
-import redis
+import redis.asyncio as redis
 import os
 from typing import Optional, List, Any
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class RedisManager:
 
@@ -9,8 +12,7 @@ class RedisManager:
     REDIS_USERNAME = os.getenv("REDIS_USERNAME", None)
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
     MAX_FRAMES_PER_CYCLE = 100000
-    
-    STREAM_MAXLEN = 1000 
+    STREAM_MAXLEN = 2 
 
     GROUPS = {
         "faces": "face_group",
@@ -42,18 +44,18 @@ class RedisManager:
         
         return self.client
     
-    def get_frame_id(self, camera_id: str) -> int:
+    async def get_frame_id(self, camera_id: str) -> int:
         r = self.get_client()
         counter_key = f'counter:{camera_id}:frame_id'
-        current_id = r.incr(counter_key)
+        current_id = await r.incr(counter_key)
 
         if current_id > self.MAX_FRAMES_PER_CYCLE:
-            r.set(counter_key, 1)
+            await r.set(counter_key, 1)
             current_id = 1
 
         return current_id
     
-    def stream_frame(self, camera_id: str, frame_id:int, frame_data: bytes):
+    async def stream_frame(self, camera_id: str, frame_id:int, frame_data: bytes):
         """
         Push a frame to the Main Stream AND fan-out to all Consumer Group streams.
         """
@@ -71,7 +73,7 @@ class RedisManager:
         # Keys: stream:cam_01:face_group, stream:cam_01:weapon_group, etc.
         for task_name, group_suffix in self.GROUPS.items():
             group_stream_key = f'{main_stream_key}:{group_suffix}'
-            r.xadd(
+            await r.xadd(
                 group_stream_key,
                 payload,
                 maxlen=self.STREAM_MAXLEN,
@@ -79,7 +81,7 @@ class RedisManager:
             )
             
 
-    def fetch_frames(self, camera_id: str, last_id: str = '$', count: int = 1, block: int = 1000) -> list:
+    async def fetch_frames(self, camera_id: str, last_id: str = '$', count: int = 1, block: int = 1000) -> list:
         """
         Fetch new processed frames from the stream.
         """
@@ -87,7 +89,7 @@ class RedisManager:
         stream_key = f'processed:{camera_id}'
 
         try:
-            response = r.xread(
+            response = await r.xread(
                 streams={stream_key: last_id},
                 count=count,
                 block=block

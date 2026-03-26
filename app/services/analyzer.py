@@ -31,9 +31,9 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
         while avhandler.running.get(camera_id, False):
             frame = avhandler.get_frame(camera_id)
             if frame is not None:
-                frame_id = rdb.get_frame_id(camera_id)
+                frame_id = await rdb.get_frame_id(camera_id)
                 frame_cache.add(camera_id, frame_id, frame)
-                rdb.stream_frame(camera_id, frame_id, frame)
+                await rdb.stream_frame(camera_id, frame_id, frame)
 
                 frames_pushed += 1
 
