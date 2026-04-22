@@ -1,0 +1,73 @@
+services:
+  redis:
+    image: redis:8-alpine
+    container_name: cvsentry-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./Redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./Redis/users.acl:/usr/local/etc/redis/users.acl:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    env_file:
+      - ./Redis/.env
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-u",
+          "redis://${REDIS_USERNAME}:${REDIS_PASSWORD}@localhost:6379",
+          "ping",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cvsentry-net
+
+  srs:
+    image: ossrs/srs:5
+    container_name: cvsentry-srs
+    restart: unless-stopped
+    env_file:
+      - ./simple_realtime_server/.env
+    ports:
+      - "1935:1935"
+      - "1985:1985"
+      - "8080:8080"
+      - "8000:8000/udp"
+    volumes:
+      - ./simple_realtime_server/srs.conf:/usr/local/srs/conf/srs.conf:ro
+    networks:
+      - cvsentry-net
+
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: cvsentry-app
+    environment:
+      PYTHONPATH: /app/app
+    restart: unless-stopped
+    env_file:
+      - ./app/.env
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      srs:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cvsentry-net
+
+volumes:
+  redis_data:
+
+networks:
+  cvsentry-net:
+    name: cvsentry-net

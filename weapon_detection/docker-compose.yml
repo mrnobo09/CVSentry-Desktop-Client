@@ -1,0 +1,32 @@
+services:
+  weapon_detection:
+    build:
+      context: ..
+      dockerfile: weapon_detection/Dockerfile
+      args:
+        # Default to cuda. Can be overridden in .env (but requires build)
+        RUNTIME: ${RUNTIME:-cuda}
+    container_name: cvsentry-weapon
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${WEAPON_PORT:-8002}:8002"
+    volumes:
+      - ./weights:/app/weapon_detection/weights:ro
+    # For GPU access (ignored gracefully by docker compose if NVIDIA runtime isn't active on the host, 
+    # but requires nvidia-container-toolkit installed)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - cvsentry-net
+
+networks:
+  cvsentry-net:
+    name: cvsentry-net
+    external: true

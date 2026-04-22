@@ -1,0 +1,3 @@
+# Ignore real credentials — never commit these
+.env
+users.acl

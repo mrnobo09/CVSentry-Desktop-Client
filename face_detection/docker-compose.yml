@@ -1,0 +1,29 @@
+services:
+  face_detection:
+    build:
+      context: ..
+      dockerfile: face_detection/Dockerfile
+      args:
+        RUNTIME: ${RUNTIME:-cuda}
+    container_name: cvsentry-face
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${FACE_PORT:-8003}:8003"
+    volumes:
+      - ./faces:/app/face_detection/faces:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - cvsentry-net
+
+networks:
+  cvsentry-net:
+    name: cvsentry-net
+    external: true
