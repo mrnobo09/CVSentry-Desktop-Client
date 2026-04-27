@@ -1,0 +1,39 @@
+# ── VCS & IDE ─────────────────────────────────────────────
+.git
+.gitignore
+**/.vscode
+**/.idea
+
+# ── Python artifacts ──────────────────────────────────────
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.venv
+venv
+ENV
+env
+
+# ── Weight files & face data (mounted via volumes) ────────
+**/weights/*
+**/faces/*
+!**/weights/.gitkeep
+!**/faces/.gitkeep
+
+# ── Storage, logs, databases ─────────────────────────────
+storage/
+logs/
+*.log
+.db
+
+# ── Docker meta (don't send compose/dockerfiles as context)
+**/docker-compose*.yml
+**/Dockerfile*
+**/.dockerignore
+**/.env
+**/.env.example
+
+# ── Docs & tests ─────────────────────────────────────────
+**/*.md
+**/tests/
+**/test.py

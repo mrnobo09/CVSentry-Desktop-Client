@@ -1,4 +1,5 @@
 import cv2
+import torch
 import numpy as np
 from pathlib import Path
 
@@ -38,6 +39,7 @@ class FaceAnalyzer:
         """
         self.skip_frames = skip_frames
         self.counter = 0
+        self.last_detections = []
 
         print("[face] 🚀 Loading InsightFace buffalo_s model...")
         self.app = FaceAnalysis(
@@ -181,7 +183,7 @@ class FaceAnalyzer:
         # Skip frame logic
         if self.counter < self.skip_frames:
             self.counter += 1
-            return []
+            return self.last_detections
         self.counter = 0
 
         try:
@@ -206,4 +208,5 @@ class FaceAnalyzer:
                 "rec_confidence": rec_conf,
             })
 
+        self.last_detections = results
         return results

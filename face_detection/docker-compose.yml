@@ -1,10 +1,25 @@
+# ============================================================
+# face_detection — Docker Compose with runtime profiles
+#
+# HOW IT WORKS:
+#   Set COMPOSE_PROFILES in your .env file to pick the runtime:
+#     COMPOSE_PROFILES=cuda      → builds Dockerfile.cuda (NVIDIA GPU)
+#     COMPOSE_PROFILES=cpu       → builds Dockerfile.cpu  (CPU-only / macOS)
+#     COMPOSE_PROFILES=openvino  → builds Dockerfile.openvino (Intel OpenVINO)
+#
+#   Then: docker compose up --build
+#
+#   Only ONE profile should be active. The others won't build or start.
+# ============================================================
+
 services:
-  face_detection:
+
+  # ── CUDA (NVIDIA GPU) ───────────────────────────────────────
+  face_detection_cuda:
+    profiles: ["cuda"]
     build:
       context: ..
-      dockerfile: face_detection/Dockerfile
-      args:
-        RUNTIME: ${RUNTIME:-cuda}
+      dockerfile: face_detection/Dockerfile.cuda
     container_name: cvsentry-face
     restart: unless-stopped
     env_file:
@@ -20,6 +35,40 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    networks:
+      - cvsentry-net
+
+  # ── CPU-only (also for macOS / MPS) ─────────────────────────
+  face_detection_cpu:
+    profiles: ["cpu"]
+    build:
+      context: ..
+      dockerfile: face_detection/Dockerfile.cpu
+    container_name: cvsentry-face
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${FACE_PORT:-8003}:8003"
+    volumes:
+      - ./faces:/app/face_detection/faces:ro
+    networks:
+      - cvsentry-net
+
+  # ── OpenVINO (Intel) ────────────────────────────────────────
+  face_detection_openvino:
+    profiles: ["openvino"]
+    build:
+      context: ..
+      dockerfile: face_detection/Dockerfile.openvino
+    container_name: cvsentry-face
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${FACE_PORT:-8003}:8003"
+    volumes:
+      - ./faces:/app/face_detection/faces:ro
     networks:
       - cvsentry-net
 

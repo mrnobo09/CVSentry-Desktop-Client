@@ -1,11 +1,25 @@
+# ============================================================
+# weapon_detection — Docker Compose with runtime profiles
+#
+# HOW IT WORKS:
+#   Set COMPOSE_PROFILES in your .env file to pick the runtime:
+#     COMPOSE_PROFILES=cuda      → builds Dockerfile.cuda (NVIDIA GPU)
+#     COMPOSE_PROFILES=cpu       → builds Dockerfile.cpu  (CPU-only / macOS)
+#     COMPOSE_PROFILES=openvino  → builds Dockerfile.openvino (Intel OpenVINO)
+#
+#   Then: docker compose up --build
+#
+#   Only ONE profile should be active. The others won't build or start.
+# ============================================================
+
 services:
-  weapon_detection:
+
+  # ── CUDA (NVIDIA GPU) ───────────────────────────────────────
+  weapon_detection_cuda:
+    profiles: ["cuda"]
     build:
       context: ..
-      dockerfile: weapon_detection/Dockerfile
-      args:
-        # Default to cuda. Can be overridden in .env (but requires build)
-        RUNTIME: ${RUNTIME:-cuda}
+      dockerfile: weapon_detection/Dockerfile.cuda
     container_name: cvsentry-weapon
     restart: unless-stopped
     env_file:
@@ -14,8 +28,6 @@ services:
       - "${WEAPON_PORT:-8002}:8002"
     volumes:
       - ./weights:/app/weapon_detection/weights:ro
-    # For GPU access (ignored gracefully by docker compose if NVIDIA runtime isn't active on the host, 
-    # but requires nvidia-container-toolkit installed)
     deploy:
       resources:
         reservations:
@@ -23,6 +35,40 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    networks:
+      - cvsentry-net
+
+  # ── CPU-only (also for macOS / MPS) ─────────────────────────
+  weapon_detection_cpu:
+    profiles: ["cpu"]
+    build:
+      context: ..
+      dockerfile: weapon_detection/Dockerfile.cpu
+    container_name: cvsentry-weapon
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${WEAPON_PORT:-8002}:8002"
+    volumes:
+      - ./weights:/app/weapon_detection/weights:ro
+    networks:
+      - cvsentry-net
+
+  # ── OpenVINO (Intel) ────────────────────────────────────────
+  weapon_detection_openvino:
+    profiles: ["openvino"]
+    build:
+      context: ..
+      dockerfile: weapon_detection/Dockerfile.openvino
+    container_name: cvsentry-weapon
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${WEAPON_PORT:-8002}:8002"
+    volumes:
+      - ./weights:/app/weapon_detection/weights:ro
     networks:
       - cvsentry-net
 

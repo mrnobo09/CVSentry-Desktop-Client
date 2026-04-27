@@ -4,7 +4,7 @@ import json
 import uuid 
 from typing import List, Dict
 from services.analysis import FrameAnalyzer
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from utils.RedisManager import redis_manager 
 from turbojpeg import TurboJPEG
 
@@ -13,7 +13,7 @@ jpeg = TurboJPEG()
 ANALYZER = FrameAnalyzer(skip_frames=2)
 
 active_monitors: Dict[str, dict] = {}
-CPU_EXECUTOR = ProcessPoolExecutor(max_workers=4)
+CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 GROUP_SUFFIX = "weapon_group"
 CONSUMER_ID = f"worker_{uuid.uuid4().hex[:8]}"

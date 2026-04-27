@@ -1,0 +1,46 @@
+# ============================================================
+# face_detection — OpenVINO Runtime
+# CPU base + onnxruntime with OpenVINO execution provider
+# NO PyTorch needed
+# ============================================================
+
+# --- Stage 1: Builder ---
+FROM python:3.11-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libturbojpeg0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# ONNX Runtime with OpenVINO backend
+RUN pip install --no-cache-dir onnxruntime onnxruntime-openvino
+
+COPY face_detection/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+
+# --- Stage 2: Runtime ---
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libturbojpeg0 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV VIRTUAL_ENV=/opt/venv
+COPY --from=builder $VIRTUAL_ENV $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /app
+
+RUN mkdir -p /app/face_detection/faces
+
+COPY face_detection/ ./face_detection/
+
+ENV PYTHONPATH=/app/face_detection
+CMD ["uvicorn", "face_detection.face_detection:app", "--host", "0.0.0.0", "--port", "8003"]

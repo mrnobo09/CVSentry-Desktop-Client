@@ -116,8 +116,8 @@ async def frame_aggregator(redis_manager, camera_ids: list):
     fps_stats = {cam_id: {"count": 0, "start_time": time.time()} for cam_id in camera_ids}
     FPS_REPORT_INTERVAL = 10
 
-    # Strict Frame Synchronization Caches by frame_id
-    face_cache: dict = {cam_id: {} for cam_id in camera_ids}
+    # Asynchronous temporal tracking for unlinked streams
+    latest_face_dets: dict = {cam_id: [] for cam_id in camera_ids}
     pending_weapons: dict = {cam_id: {} for cam_id in camera_ids}
 
     pulled_counts: dict = {cam_id: 0 for cam_id in camera_ids}
@@ -156,17 +156,11 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                         detections  = orjson.loads(det_bytes) if det_bytes else []
 
                         if stream_type == "face":
-                            # Cache explicitly by frame_id
-                            face_cache[camera_id][frame_id] = detections
+                            latest_face_dets[camera_id] = detections
                             has_recognition = any(d.get("recognized") for d in detections)
                             if has_recognition:
                                 names = [d.get("identity") for d in detections if d.get("recognized")]
                                 print(f"[app/{camera_id}] 🔍 Face recognized in frame {frame_id}: {names}")
-                            
-                            # GC face cache (keep last 50 max to prevent ballooning)
-                            if len(face_cache[camera_id]) > 50:
-                                min_k = min(face_cache[camera_id].keys())
-                                del face_cache[camera_id][min_k]
 
                         elif stream_type == "weapon":
                             pulled_counts[camera_id] = pulled_counts.get(camera_id, 0) + 1
@@ -201,32 +195,24 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                 f_ids = list(pending_weapons[camera_id].keys())
                 for f_id in f_ids:
                     w_data = pending_weapons[camera_id][f_id]
-                    
-                    is_match = f_id in face_cache[camera_id]
-                    is_timeout = (now - w_data["timestamp"]) >= 0.08  # 80ms strict timeout buffer
-                    
-                    if is_match or is_timeout:
-                        if is_match:
-                            face_dets = face_cache[camera_id].pop(f_id)
-                        else:
-                            face_dets = []
+                    face_dets = latest_face_dets.get(camera_id, [])
 
-                        raw_frame_bytes = frame_cache.get(camera_id, f_id)
-                        if raw_frame_bytes is None:
-                            # Frame expired from in-memory pool
-                            del pending_weapons[camera_id][f_id]
-                            continue
-
-                        # Add to batch draw task
-                        tasks_to_draw.append({
-                            "camera_id": camera_id,
-                            "frame_id": f_id,
-                            "w_data": w_data,
-                            "face_dets": face_dets,
-                            "raw_frame_bytes": raw_frame_bytes
-                        })
-                        
+                    raw_frame_bytes = frame_cache.get(camera_id, f_id)
+                    if raw_frame_bytes is None:
+                        # Frame expired from in-memory pool
                         del pending_weapons[camera_id][f_id]
+                        continue
+
+                    # Add to batch draw task
+                    tasks_to_draw.append({
+                        "camera_id": camera_id,
+                        "frame_id": f_id,
+                        "w_data": w_data,
+                        "face_dets": face_dets,
+                        "raw_frame_bytes": raw_frame_bytes
+                    })
+                    
+                    del pending_weapons[camera_id][f_id]
 
             # 3. Offload drawing in parallel
             if tasks_to_draw:

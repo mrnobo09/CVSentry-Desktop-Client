@@ -9,7 +9,7 @@ load_dotenv()
 
 DJANGO_SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "crazysupersecretkey")
 SRS_HTTP_PORT = os.getenv("SRS_HTTP_PORT", "8080")
-SRS_BASE_URL = f"http://localhost:{SRS_HTTP_PORT}/live"
+SRS_BASE_URL = f"http://srs:{SRS_HTTP_PORT}/live"
 
 router = APIRouter()
 

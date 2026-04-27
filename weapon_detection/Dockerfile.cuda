@@ -1,0 +1,65 @@
+# ============================================================
+# weapon_detection — CUDA Runtime
+# Uses nvidia/cuda base with PyTorch GPU wheels
+# ============================================================
+
+# --- Stage 1: Builder (compile wheels, install deps) ---
+FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04 AS builder
+
+# Enable universe repo (libturbojpeg0-dev is in universe, not main)
+RUN sed -i 's/Components: main restricted/Components: main restricted universe/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    build-essential \
+    pkg-config \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    libturbojpeg0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build everything inside a venv so we can copy it cleanly
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Install PyTorch (CUDA 12.1 wheels — compatible with CUDA 12.x runtime)
+RUN pip install --no-cache-dir torch torchvision \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Install project deps
+COPY weapon_detection/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+
+# --- Stage 2: Runtime (slim — no compilers) ---
+FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
+
+# Enable universe repo (libturbojpeg0 is in universe, not main)
+RUN sed -i 's/Components: main restricted/Components: main restricted universe/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    libgl1 \
+    libglib2.0-0 \
+    libturbojpeg0t64 \
+    libcairo2 \
+    libgirepository-1.0-1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the entire venv from builder
+ENV VIRTUAL_ENV=/opt/venv
+COPY --from=builder $VIRTUAL_ENV $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /app
+
+# Volume mount point for weights (populated at runtime)
+RUN mkdir -p /app/weapon_detection/weights
+
+# Copy source code
+COPY weapon_detection/ ./weapon_detection/
+
+ENV PYTHONPATH=/app/weapon_detection
+CMD ["uvicorn", "weapon_detection.weapon_detection:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import math
 from typing import List, Dict, Any, Optional
 from turbojpeg import TurboJPEG
 
@@ -54,7 +55,7 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                     color = (0, 165, 255) # Orange for holding weapon
                 else: 
                     color = (255, 255, 0) # Cyan/Yellow for normal person
-            elif label in ["pistol", "rifle", "knife", "weapon"]: # Check your model class names
+            elif label.lower() in ["pistol", "rifle", "knife", "weapon"]: # Check your model class names
                 color = (0, 0, 255) # Red for weapon itself
             # ---- Face detection labels ----
             elif label == "COMBINED_THREAT":
@@ -76,13 +77,13 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                     if p1_idx < len(keypoints) and p2_idx < len(keypoints):
                         pt1 = keypoints[p1_idx]
                         pt2 = keypoints[p2_idx]
-                        # Check confidence or if 0,0
-                        if pt1[0] > 0 and pt2[0] > 0:
+                        # Check confidence or if 0,0 and avoid NaN before int cast
+                        if not math.isnan(pt1[0]) and not math.isnan(pt2[0]) and pt1[0] > 0 and pt2[0] > 0:
                             cv2.line(frame, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])), color, 2)
                 
                 # Draw Keypoints (Wrists red if holding)
                 for idx, kp in enumerate(keypoints):
-                     if kp[0] > 0:
+                     if not math.isnan(kp[0]) and kp[0] > 0:
                         c = color
                         if idx in [9,10] and det.get("has_weapon"): c = (0,0,255)
                         cv2.circle(frame, (int(kp[0]), int(kp[1])), 3, c, -1)
@@ -95,14 +96,19 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                     # Let's approximate start point from the person center or iterate wrists
                     # Since we don't know which wrist is aiming here easily without re-calc, 
                     # let's just use the person center or keypoint 9/10 if avail.
-                    start_pt = (int(keypoints[9][0]), int(keypoints[9][1])) if len(keypoints) > 9 and keypoints[9][0]>0 else (int(keypoints[0][0]), int(keypoints[0][1]))
+                    start_pt = None
+                    if len(keypoints) > 9 and not math.isnan(keypoints[9][0]) and keypoints[9][0]>0:
+                        start_pt = (int(keypoints[9][0]), int(keypoints[9][1]))
+                    elif len(keypoints) > 0 and not math.isnan(keypoints[0][0]) and keypoints[0][0]>0:
+                        start_pt = (int(keypoints[0][0]), int(keypoints[0][1]))
                     
-                    end_x = start_pt[0] + aiming_vec[0] * 200
-                    end_y = start_pt[1] + aiming_vec[1] * 200
-                    cv2.arrowedLine(frame, start_pt, (int(end_x), int(end_y)), (0, 0, 255), 4)
+                    if start_pt and not math.isnan(aiming_vec[0]) and not math.isnan(aiming_vec[1]):
+                        end_x = start_pt[0] + aiming_vec[0] * 200
+                        end_y = start_pt[1] + aiming_vec[1] * 200
+                        cv2.arrowedLine(frame, start_pt, (int(end_x), int(end_y)), (0, 0, 255), 4)
 
             # DRAW BOX
-            if box and len(box) == 4:
+            if box and len(box) == 4 and not any(math.isnan(b) for b in box):
                 # Cast to int for OpenCV
                 x1, y1, x2, y2 = map(int, box)
 

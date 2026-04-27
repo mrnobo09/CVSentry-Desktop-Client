@@ -3,26 +3,31 @@ import cv2
 import math
 import numpy as np
 import torch
+import os
+import time
+
+MODEL_PATH = "weights/weapon/best.onnx"
+MODEL_PATH_OPENVINO = "weights/weapon/best_2_openvino_model"
 
 # Load Models
 try:
     if torch.cuda.is_available():
         print("[weapon] 🚀 CUDA is available. Executor: CUDA")
-        weapon_model = YOLO('weights/weapon/best_2.onnx')
-        pose_model = YOLO('weights/pose/yolo11s-pose.onnx')
+        weapon_model = YOLO(MODEL_PATH, task="detect")
+        pose_model = YOLO('weights/pose/yolo11s-pose.onnx', task="pose")
         INFERENCE_DEVICE = 0
     else:
         print("[weapon] ⚡ CUDA not found. Attempting to load OpenVINO optimized models. Executor: OpenVINO")
         # Note: Ultralytics uses the format of the loaded model path to trigger OpenVINO. 
         # When an OpenVINO model is loaded, passing device="cpu" tells the OpenVINO backend to run on the CPU.
-        weapon_model = YOLO('weights/weapon/best_2_openvino_model')
-        pose_model = YOLO('weights/pose/yolo11s-pose_openvino_model') 
+        weapon_model = YOLO('weights/weapon/best_2_openvino_model', task="detect")
+        pose_model = YOLO('weights/pose/yolo11s-pose_openvino_model', task="pose") 
         INFERENCE_DEVICE = "cpu"
 except Exception as e:
     print(f"[weapon] 💻 Primary models failed to load. Loading fallback ONNX models. Executor: CPU ({e})")
     # Fallback to standard ONNX models (runs on CPU)
-    weapon_model = YOLO('weights/weapon/best_2.onnx')
-    pose_model = YOLO('weights/pose/yolo11s-pose.onnx')
+    weapon_model = YOLO(MODEL_PATH, task="detect")
+    pose_model = YOLO("weights/pose/yolo11s-pose.onnx", task="pose")
     INFERENCE_DEVICE = "cpu"
 
 class FrameAnalyzer:
@@ -33,6 +38,7 @@ class FrameAnalyzer:
         """
         self.skip_frames = skip_frames
         self.counter = 0
+        self.last_detections = []
 
     def analyze_frame(self, frame):
         """
@@ -43,16 +49,27 @@ class FrameAnalyzer:
         """
         if frame is None:
             return []
+            
+        # Optional: Save debug images occasionally to see what model sees
+        debug_dir = os.path.join(os.path.dirname(__file__), "..", "test", "input_image")
+        if not os.path.exists(debug_dir):
+            os.makedirs(debug_dir, exist_ok=True)
+            
+        if self.counter == 0:
+            # We don't want to overflow the test folder, restrict to 20 images max roughly based on some logic,
+            # Or we can just randomly save one every time analyze_frame initiates natively
+            if len(os.listdir(debug_dir)) < 20: 
+                cv2.imwrite(os.path.join(debug_dir, f"input_{int(time.time()*100)}.jpg"), frame)
 
         # Skip frame logic
         if self.counter < self.skip_frames:
             self.counter += 1
-            return []  # skipped
+            return self.last_detections  # return cached detections on skipped frame
 
         self.counter = 0
 
         # 1. Run Weapon Detection
-        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.7, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
+        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.20, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
         
         # 2. Run Pose Estimation
         # Using a lower conf for pose to ensure we catch people even if partially occluded
@@ -186,4 +203,5 @@ class FrameAnalyzer:
                  
             detections.append(pose_entry)
 
+        self.last_detections = detections
         return detections
