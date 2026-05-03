@@ -1,10 +1,7 @@
 from ultralytics import YOLO
-import cv2
 import math
-import numpy as np
 import torch
-import os
-import time
+
 
 MODEL_PATH = "weights/weapon/best.onnx"
 MODEL_PATH_OPENVINO = "weights/weapon/best_2_openvino_model"
