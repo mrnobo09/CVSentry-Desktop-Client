@@ -108,8 +108,8 @@ async def frame_aggregator(redis_manager, camera_ids: list):
         **{f"face:{cam_id}":   "$" for cam_id in camera_ids},
     }
 
-    # Increased Jitter Buffer Size for smoother outputs from delayed multithreading
-    BUFFER_SIZE = 5
+    # Balanced Jitter Buffer for multi-worker sync (3 frames @ 10fps = ~300ms latency)
+    BUFFER_SIZE = 3
     LOG_EVERY_N = 30
     frame_buffers: dict = {cam_id: [] for cam_id in camera_ids}
 

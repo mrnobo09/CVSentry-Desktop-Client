@@ -3,6 +3,7 @@ from services.avhandler import AVHandler
 from schemas.cameras import Cameras
 from utils.redis_manager import redis_manager as rdb
 from utils.frame_cache import frame_cache
+from utils.latency_tracker import pipeline_tracker
 from routes.node_routes import notify_cameras_active
 
 # Log every Nth frame to avoid console flood
@@ -32,6 +33,7 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
             frame = avhandler.get_frame(camera_id)
             if frame is not None:
                 frame_id = await rdb.get_frame_id(camera_id)
+                pipeline_tracker.mark_start(camera_id, frame_id)
                 frame_cache.add(camera_id, frame_id, frame)
                 await rdb.stream_frame(camera_id, frame_id, frame)
 

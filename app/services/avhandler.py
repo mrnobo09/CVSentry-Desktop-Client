@@ -38,6 +38,8 @@ class AVHandler:
                         'max_delay': '5000',
                         'fflags': 'nobuffer',
                         'flags': 'low_delay',
+                        'probesize': '32',
+                        'analyzeduration': '0',
                         'strict': 'experimental'
                     },
                     timeout=10.0

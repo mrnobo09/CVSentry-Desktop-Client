@@ -130,7 +130,9 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
 
                 await redis_manager.client.xadd(
                     name=f"face:{camera_id}",
-                    fields=payload
+                    fields=payload,
+                    maxlen=5,
+                    approximate=False
                 )
                 await redis_manager.ack_message(input_stream_name, GROUP_SUFFIX, [msg_id])
 

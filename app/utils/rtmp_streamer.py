@@ -1,33 +1,41 @@
 import subprocess
 import shlex
-import time
 import threading
-from queue import Queue, Empty, Full
 
 class RTMPStreamer:
     def __init__(self, rtmp_url: str, fps: int = 10):
         self.rtmp_url = rtmp_url
         self.fps = fps
-        self.frame_interval = 1.0 / fps
         self.process = None
         self.running = False
 
-        # Small queue — drop oldest when full to stay live
-        self.frame_queue = Queue(maxsize=2)
-        self.writer_thread = None
-
         # FFmpeg command
-        # Input: JPEG pipe from frame_aggregator (already 640px wide)
-        # Output: 360p H.264 at low bitrate → SRS RTMP
         command_str = (
             f"ffmpeg -y "
-            f"-fflags nobuffer -probesize 32 -analyzeduration 0 "
-            f"-f image2pipe -vcodec mjpeg -r {fps} -i - "
-            f"-vf scale=-2:360 "                      # Scale to 360p, keep aspect ratio
-            f"-c:v libx264 -preset ultrafast -tune zerolatency "
-            f"-pix_fmt yuv420p -g {fps * 2} "
-            f"-b:v 400k -maxrate 400k -bufsize 600k "  # ~60% less bandwidth vs 1000k
+            
+            f"-use_wallclock_as_timestamps 1 "
+            f"-fflags +nobuffer+discardcorrupt "
+            f"-probesize 32 -analyzeduration 0 "
+            f"-f image2pipe -vcodec mjpeg -i - "  
+            
+            f"-c:v libx264 "
+            f"-preset ultrafast "
+            f"-tune zerolatency "
+            f"-x264-params 'bframes=0:force-cfr=1:no-mbtree=1:sync-lookahead=0:rc-lookahead=0:sliced-threads=1:threads=2' "
+            f"-pix_fmt yuv420p "
+            f"-bf 0 "
+            f"-flags +low_delay "
+            
+            # ── RATE CONTROL: CBR with tighter buffer ──
+            f"-b:v 300k -minrate 300k -maxrate 300k -bufsize 150k "
+            
+            # ── GOP: keyframe every second, no scene-cut insertions ──
+            f"-r {fps} -g {fps} -keyint_min {fps} -sc_threshold 0 "
+            
+            # ── OUTPUT: zero client-side RTMP buffering ──
             f"-flush_packets 1 "
+            f"-rtmp_buffer 0 "
+            f"-rtmp_live live "
             f"-f flv {rtmp_url}"
         )
         self.command = shlex.split(command_str)
@@ -38,77 +46,34 @@ class RTMPStreamer:
         
         print(f"📡 Starting RTMP Stream: {self.rtmp_url}")
         
-        # 1. Start FFmpeg (bufsize=0 ensures unbuffered pipe for real-time)
         self.process = subprocess.Popen(
             self.command,
             stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE, # Capture errors to debug "Black Screen"
-            bufsize=0               # CRITICAL: Disable Python buffering
+            stderr=subprocess.PIPE,
+            bufsize=0
         )
         
-        # 2. Start Background Pacer
         self.running = True
-        self.writer_thread = threading.Thread(target=self._frame_pacer, daemon=True)
-        self.writer_thread.start()
-        
-        # 3. Start Error Logger (Optional but recommended)
         threading.Thread(target=self._log_ffmpeg_errors, daemon=True).start()
 
-    def _frame_pacer(self):
-        """Writes frames ensuring a minimum time gap to smooth bursts."""
-        last_write_time = 0
-        
-        while self.running:
-            try:
-                # Wait for a frame (blocking allows CPU to rest)
-                frame_bytes = self.frame_queue.get(timeout=1.0)
-            except Empty:
-                continue # Keep waiting if no input
-
-            # --- PACING LOGIC ---
-            # Calculate how long since the last frame was sent
-            elapsed = time.time() - last_write_time
-            wait_needed = self.frame_interval - elapsed
-
-            # If we are going too fast (Burst), slow down
-            if wait_needed > 0:
-                time.sleep(wait_needed)
-
-            # Write to FFmpeg
-            self._write_to_pipe(frame_bytes)
-            last_write_time = time.time()
-
-    def _write_to_pipe(self, frame_bytes):
-        if self.process and self.process.stdin:
-            try:
-                self.process.stdin.write(frame_bytes)
-                self.process.stdin.flush()
-            except BrokenPipeError:
-                print(f"⚠️ Pipe broken for {self.rtmp_url}. Restarting...")
-                self._restart_process()
-            except Exception as e:
-                print(f"⚠️ Write Error: {e}")
-
     def write(self, frame_bytes: bytes):
-        """Public API: Drops oldest frame if queue is full to prioritize live feed."""
-        if not self.running: return
+        """Direct, blocking write to FFmpeg. Zero queues, zero artificial pacing."""
+        if not self.running or not self.process or not self.process.stdin:
+            return
 
         try:
-            self.frame_queue.put_nowait(frame_bytes)
-        except Full:
-            # Drop oldest to make room for new (Low Latency Strategy)
-            try:
-                self.frame_queue.get_nowait()
-                self.frame_queue.put_nowait(frame_bytes)
-            except:
-                pass
+            self.process.stdin.write(frame_bytes)
+            self.process.stdin.flush()
+        except BrokenPipeError:
+            print(f"⚠️ Pipe broken for {self.rtmp_url}. Restarting...")
+            self._restart_process()
+        except Exception as e:
+            print(f"⚠️ Write Error: {e}")
 
     def _log_ffmpeg_errors(self):
-        """Reads FFmpeg stderr to help debug black screens."""
         while self.running and self.process:
             line = self.process.stderr.readline()
             if line:
-                # Filter out generic info, print only errors/warnings
                 line_str = line.decode('utf-8', errors='ignore').strip()
                 if "Error" in line_str or "warning" in line_str.lower():
                     print(f"ffmpeg [{self.rtmp_url}]: {line_str}")

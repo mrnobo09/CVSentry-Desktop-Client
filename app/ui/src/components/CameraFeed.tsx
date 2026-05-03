@@ -50,6 +50,9 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
           enableWorker: true,
           enableStashBuffer: false,
           stashInitialSize: 128,
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 1.5,
+          liveBufferLatencyMinRemain: 0.3,
         });
 
         playerRef.current = player;

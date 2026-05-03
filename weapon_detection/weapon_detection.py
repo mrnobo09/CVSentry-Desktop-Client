@@ -46,6 +46,17 @@ async def _auto_discover_loop():
 async def lifespan(app: FastAPI):
     print("--- 🔫 Weapon Detection Service Starting ---")
 
+    print("🔥 Warming up YOLO models in memory...")
+    from services.analysis import weapon_model, pose_model, INFERENCE_DEVICE
+    import numpy as np
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    try:
+        weapon_model.predict(source=dummy_frame, verbose=False, device=INFERENCE_DEVICE)
+        pose_model.predict(source=dummy_frame, verbose=False, device=INFERENCE_DEVICE)
+        print("✅ YOLO models warmed up successfully.")
+    except Exception as e:
+        print(f"⚠️ YOLO model warmup failed: {e}")
+
     # Connect to Redis
     try:
         await redis_manager.connect()

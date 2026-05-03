@@ -5,6 +5,7 @@ from utils.redis_manager import redis_manager as rdb
 from services.frame_aggregator import frame_aggregator
 from utils.rtmp_streamer import RTMPStreamer
 from routes.node_routes import send_threat_alert
+from utils.latency_tracker import pipeline_tracker
 
 SRS_BASE_URL = os.getenv("SRS_BASE_URL", "rtmp://localhost/live")
 
@@ -29,7 +30,7 @@ async def start_rtmp_broadcasting(camera_ids: List[str]):
         streamers[cam_id] = RTMPStreamer(stream_url)   # fps=10, 360p — set in RTMPStreamer
         streamers[cam_id].start()
 
-
+ 
     try:
         async for data in frame_aggregator(rdb, camera_ids):
             target_cam = data['camera_id']
@@ -37,6 +38,10 @@ async def start_rtmp_broadcasting(camera_ids: List[str]):
 
             if target_cam in streamers:
                 streamers[target_cam].write(frame_bytes)
+
+                frame_id = data.get('frame_id')
+                if frame_id is not None:
+                    pipeline_tracker.mark_end(target_cam, frame_id)
 
                 frames_sent[target_cam] += 1
                 n = frames_sent[target_cam]

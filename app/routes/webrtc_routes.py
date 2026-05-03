@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SRS_API_PORT = os.getenv("SRS_API_PORT", "1985")
-SRS_HTTP_URL = f"http://localhost:{SRS_API_PORT}"
+SRS_HOST = os.getenv("SRS_HOST", "srs")
+SRS_HTTP_URL = f"http://{SRS_HOST}:{SRS_API_PORT}"
 
 router = APIRouter()
 

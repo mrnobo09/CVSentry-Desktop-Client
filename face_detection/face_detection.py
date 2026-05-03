@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import asyncio
-
+import numpy as np
 from utils.RedisManager import redis_manager
 from services import background_processor
 
@@ -45,6 +45,16 @@ async def _auto_discover_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("--- 👤 Face Detection Service Starting ---")
+
+    print("🔥 Warming up Face Detection models in memory...")
+    from services.background_processor import ANALYZER
+    
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    try:
+        ANALYZER.app.get(dummy_frame)
+        print("✅ Face Detection models warmed up successfully.")
+    except Exception as e:
+        print(f"⚠️ Face Detection model warmup failed: {e}")
 
     # Connect to Redis
     try:

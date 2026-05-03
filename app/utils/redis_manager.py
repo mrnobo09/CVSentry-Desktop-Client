@@ -77,7 +77,7 @@ class RedisManager:
                 group_stream_key,
                 payload,
                 maxlen=self.STREAM_MAXLEN,
-                approximate=True
+                approximate=False
             )
             
 

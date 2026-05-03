@@ -50,17 +50,6 @@ class FrameAnalyzer:
         if frame is None:
             return []
             
-        # Optional: Save debug images occasionally to see what model sees
-        debug_dir = os.path.join(os.path.dirname(__file__), "..", "test", "input_image")
-        if not os.path.exists(debug_dir):
-            os.makedirs(debug_dir, exist_ok=True)
-            
-        if self.counter == 0:
-            # We don't want to overflow the test folder, restrict to 20 images max roughly based on some logic,
-            # Or we can just randomly save one every time analyze_frame initiates natively
-            if len(os.listdir(debug_dir)) < 20: 
-                cv2.imwrite(os.path.join(debug_dir, f"input_{int(time.time()*100)}.jpg"), frame)
-
         # Skip frame logic
         if self.counter < self.skip_frames:
             self.counter += 1
@@ -69,7 +58,7 @@ class FrameAnalyzer:
         self.counter = 0
 
         # 1. Run Weapon Detection
-        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.20, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
+        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.6, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
         
         # 2. Run Pose Estimation
         # Using a lower conf for pose to ensure we catch people even if partially occluded

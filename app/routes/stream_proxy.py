@@ -48,7 +48,7 @@ async def proxy_stream(
             async with client.stream("GET", srs_url) as response:
                 if response.status_code != 200:
                     raise HTTPException(status_code=response.status_code, detail="SRS stream not available")
-                async for chunk in response.aiter_bytes(chunk_size=8192):
+                async for chunk in response.aiter_bytes(chunk_size=4096):
                     yield chunk
 
     return StreamingResponse(
