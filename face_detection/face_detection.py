@@ -112,13 +112,20 @@ async def status():
 @app.post("/reload-faces")
 async def reload_faces():
     """
-    Hot-reload the known faces database without restarting the service.
-    Call this after adding new images to the faces/ directory.
+    Legacy endpoint — face data is now managed via Qdrant.
+    The local Qdrant is synced automatically by the orchestrator.
+    This endpoint now returns the current Qdrant connection status.
     """
-    from services.analysis import ANALYZER
-    ANALYZER.reload_known_faces()
+    from services.background_processor import ANALYZER
+    connected = ANALYZER.qdrant is not None
+    count = 0
+    if connected:
+        try:
+            info = ANALYZER.qdrant.get_collection(collection_name="faces")
+            count = info.points_count
+        except Exception:
+            pass
     return {
-        "status": "reloaded",
-        "known_identities": list(ANALYZER.known_embeddings.keys()),
-        "count": len(ANALYZER.known_embeddings)
+        "status": "qdrant_connected" if connected else "qdrant_disconnected",
+        "known_faces_count": count,
     }

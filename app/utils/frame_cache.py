@@ -3,7 +3,7 @@ import time
 from typing import Dict, Optional, Tuple, Any
 
 # CONFIGURATION
-FRAME_TTL = 5.0  # Seconds before a frame is deleted if not retrieved
+FRAME_TTL = 2.0  # Seconds before a frame is deleted if not retrieved
 CLEANUP_INTERVAL = 100  # Run cleanup every N insertions to save CPU
 
 class FrameCache:

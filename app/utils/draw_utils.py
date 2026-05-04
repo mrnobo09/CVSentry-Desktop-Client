@@ -139,8 +139,7 @@ def draw_detections(frame_bytes: bytes, detections: List[Dict[str, Any]]) -> Opt
                             cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1)
 
         # 3. Encode Numpy Array -> Bytes (JPEG) using TurboJPEG
-        # Quality 70 keeps streams fast and light
-        return jpeg.encode(frame, quality=70)
+        return jpeg.encode(frame)
 
     except Exception as e:
         print(f"⚠️ Error drawing detections: {e}")

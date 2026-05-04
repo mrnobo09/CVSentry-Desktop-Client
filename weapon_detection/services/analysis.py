@@ -55,11 +55,11 @@ class FrameAnalyzer:
         self.counter = 0
 
         # 1. Run Weapon Detection
-        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.6, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
+        weapon_results = weapon_model.predict(source=frame, verbose=False, conf=0.7, iou=0.5, max_det=50, device=INFERENCE_DEVICE)
         
         # 2. Run Pose Estimation
         # Using a lower conf for pose to ensure we catch people even if partially occluded
-        pose_results = pose_model.predict(source=frame, verbose=False, conf=0.5, device=INFERENCE_DEVICE)
+        pose_results = pose_model.predict(source=frame, verbose=False, conf=0.7, device=INFERENCE_DEVICE)
 
         detections = []
         

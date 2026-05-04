@@ -12,7 +12,7 @@ jpeg = TurboJPEG()
 
 # Parameters to tune performance
 FRAME_SKIP = 3          # Keep 1 in every N frames  (higher = fewer frames, less CPU/Redis load)
-JPEG_QUALITY = 60       # JPEG encode quality (50-75 is a good range)
+JPEG_QUALITY = 80       # JPEG encode quality (50-75 is a good range)
 INFER_RESOLUTION = 640  # Long-edge cap before pushing to Redis (matches YOLO training size)
 
 

@@ -1,7 +1,5 @@
-import cv2
-import torch
+import os
 import numpy as np
-from pathlib import Path
 
 try:
     from insightface.app import FaceAnalysis
@@ -10,26 +8,25 @@ except ImportError as e:
         "insightface is not installed. Run: pip install insightface onnxruntime"
     ) from e
 
+from qdrant_client import QdrantClient
+
 # ---------------------------------------------------------------------------
 # Cosine similarity threshold for recognition.
 # Lower = stricter match. Tune this if you get too many false positives/negatives.
 # ---------------------------------------------------------------------------
 RECOGNITION_THRESHOLD = 0.45
 
-# Path to the known faces directory (relative to where the worker is launched)
-FACES_DIR = Path("faces")
+# Qdrant connection — points to the local edge Qdrant container
+QDRANT_URL = os.getenv("QDRANT_URL", "http://cvsentry-qdrant:6333")
+COLLECTION_NAME = "faces"
 
 
 class FaceAnalyzer:
     """
     Detects and recognizes faces in a frame using InsightFace buffalo_s.
 
-    Known faces are loaded from:
-        faces/{Person_Name}/img1.jpg
-        faces/{Person_Name}/img2.jpg
-        ...
-    Folder name (underscores replaced with spaces) becomes the identity.
-    All images per person are encoded and averaged into a single embedding.
+    Known faces are looked up from the local Qdrant vector database,
+    which is kept in sync with the Cloud by the orchestrator's face_sync service.
     """
 
     def __init__(self, skip_frames: int = 0):
@@ -64,100 +61,73 @@ class FaceAnalyzer:
         except Exception:
             print("[face] ✅ InsightFace model ready.")
 
-        # Dict: identity_name (str) -> averaged_embedding (np.ndarray, shape 512)
-        self.known_embeddings: dict = self._load_known_faces()
+        # Connect to local Qdrant
+        self.qdrant = None
+        self._connect_qdrant()
 
     # ------------------------------------------------------------------
-    # Known-face database loading
+    # Qdrant connection
     # ------------------------------------------------------------------
 
-    def _load_known_faces(self) -> dict:
-        """
-        Walks faces/{person_name}/ subdirectories.
-        Encodes every image, averages embeddings per person.
-        Returns: { "John Doe": np.ndarray(512,), ... }
-        """
-        db = {}
-
-        if not FACES_DIR.exists():
-            print(f"[face] ⚠️  faces/ directory not found at '{FACES_DIR.resolve()}'. No known faces loaded.")
-            return db
-
-        for person_dir in sorted(FACES_DIR.iterdir()):
-            if not person_dir.is_dir():
-                continue
-
-            # Folder name → identity label (underscores → spaces)
-            name = person_dir.name.replace("_", " ")
-            embeddings = []
-
-            image_files = list(person_dir.glob("*.[jJ][pP][gG]")) + \
-                          list(person_dir.glob("*.[jJ][pP][eE][gG]")) + \
-                          list(person_dir.glob("*.[pP][nN][gG]"))
-
-            for img_path in sorted(image_files):
-                img = cv2.imread(str(img_path))
-                if img is None:
-                    print(f"[face] ⚠️  Could not read image: {img_path}")
-                    continue
-
-                detected = self.app.get(img)
-                if not detected:
-                    print(f"[face] ⚠️  No face detected in: {img_path.name} — skipping")
-                    continue
-
-                # Use the highest-confidence face if multiple are found
-                best_face = max(detected, key=lambda f: f.det_score)
-                embeddings.append(best_face.embedding)
-
-            if embeddings:
-                avg_embedding = np.mean(embeddings, axis=0)
-                # Normalize for cosine similarity
-                avg_embedding /= np.linalg.norm(avg_embedding)
-                db[name] = avg_embedding
-                print(f"[face] 👤 Loaded '{name}' from {len(embeddings)} image(s)")
-            else:
-                print(f"[face] ⚠️  No valid face images found for '{name}' — skipping")
-
-        print(f"[face] 📚 Known faces database: {len(db)} identit{'y' if len(db)==1 else 'ies'} loaded.")
-        return db
-
-    def reload_known_faces(self):
-        """Hot-reload the known faces DB without restarting the worker."""
-        print("[face] 🔄 Reloading known faces database...")
-        self.known_embeddings = self._load_known_faces()
+    def _connect_qdrant(self):
+        """Connects to the local Qdrant instance."""
+        try:
+            self.qdrant = QdrantClient(url=QDRANT_URL)
+            # Check if the collection exists
+            try:
+                info = self.qdrant.get_collection(collection_name=COLLECTION_NAME)
+                count = info.points_count
+                print(f"[face] 📚 Connected to local Qdrant — {count} known face(s) in database.")
+            except Exception:
+                print(f"[face] ⚠️ Qdrant collection '{COLLECTION_NAME}' not found. "
+                      "Waiting for orchestrator sync to create it.")
+                self.qdrant = None
+        except Exception as e:
+            print(f"[face] ⚠️ Could not connect to Qdrant at {QDRANT_URL}: {e}")
+            self.qdrant = None
 
     # ------------------------------------------------------------------
-    # Recognition helpers
+    # Recognition via Qdrant vector search
     # ------------------------------------------------------------------
 
     def _recognize(self, embedding: np.ndarray):
         """
-        Compares embedding against known_embeddings using cosine similarity.
+        Searches the local Qdrant database for the nearest known face.
         Returns: (identity: str | None, confidence: float)
         """
-        if not self.known_embeddings:
-            return None, 0.0
+        if self.qdrant is None:
+            # Try to reconnect lazily
+            self._connect_qdrant()
+            if self.qdrant is None:
+                return None, 0.0
 
         # Normalize query embedding
         norm = np.linalg.norm(embedding)
         if norm == 0:
             return None, 0.0
-        query = embedding / norm
+        query_vector = (embedding / norm).tolist()
 
-        best_name = None
-        best_sim = -1.0
+        try:
+            # query_points is the new standard API for qdrant-client 1.16.0+
+            results = self.qdrant.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_vector,
+                limit=1,
+                score_threshold=RECOGNITION_THRESHOLD,
+            ).points
 
-        for name, ref_emb in self.known_embeddings.items():
-            sim = float(np.dot(query, ref_emb))  # cosine similarity (both normalized)
-            if sim > best_sim:
-                best_sim = sim
-                best_name = name
+            if results:
+                best = results[0]
+                identity = best.payload.get("name")
+                confidence = round(best.score, 3)
+                return identity, confidence
 
-        if best_sim >= RECOGNITION_THRESHOLD:
-            return best_name, round(best_sim, 3)
+        except Exception as e:
+            print(f"[face] ⚠️ Qdrant search error ({type(self.qdrant)}): {e}")
+            # Invalidate connection so we retry next time
+            self.qdrant = None
 
-        return None, round(best_sim, 3)
+        return None, 0.0
 
     # ------------------------------------------------------------------
     # Main inference

@@ -1,9 +1,11 @@
 import os
 import socket
+import asyncio
 import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from dependencies.auth import verify_token
+from services.face_sync import sync_faces
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -75,6 +77,10 @@ async def register_node(payload: RegisterPayload):
             node_data = response.json()
             _node_state["node_id"] = node_data.get("id")
             print(f"[node] ✅ Registered as node #{node_data.get('id')} ({base_url})")
+
+            # Trigger initial face sync immediately after registration
+            asyncio.create_task(sync_faces(token))
+
             return {"status": "registered", "node": node_data}
         else:
             raise HTTPException(status_code=response.status_code, detail=response.text)

@@ -5,9 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes.camera_routes import router as camera_routes
-from routes.node_routes import router as node_routes, send_heartbeat, mark_offline
+from routes.node_routes import router as node_routes, send_heartbeat, mark_offline, _node_state
 from routes.stream_proxy import router as stream_proxy
 from routes.webrtc_routes import router as webrtc_routes
+from services.face_sync import face_sync_loop, sync_state
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,13 +27,20 @@ async def _heartbeat_loop():
             pass
 
 
+def _get_access_token():
+    """Returns the current access token from node state, or None."""
+    return _node_state.get("access_token")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: launch heartbeat background task
-    task = asyncio.create_task(_heartbeat_loop())
+    # Startup: launch heartbeat + face sync background tasks
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+    sync_task = asyncio.create_task(face_sync_loop(_get_access_token))
     yield
-    # Shutdown: cancel heartbeat, mark node offline
-    task.cancel()
+    # Shutdown: cancel tasks, mark node offline
+    heartbeat_task.cancel()
+    sync_task.cancel()
     try:
         await mark_offline()
     except Exception:
@@ -59,3 +67,14 @@ app.include_router(webrtc_routes)  # /webrtc/{camera_id}/whep
 @app.get("/")
 async def read_root():
     return {"message": "CVSentry Desktop Client Node", "base_url": NODE_BASE_URL, "port": NODE_PORT}
+
+
+@app.get("/sync/status")
+async def get_sync_status():
+    """Returns the current face sync status for the UI to poll."""
+    return {
+        "is_syncing": sync_state["is_syncing"],
+        "last_sync": sync_state["last_sync"],
+        "last_error": sync_state["last_error"],
+        "faces_synced": sync_state["faces_synced"],
+    }

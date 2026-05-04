@@ -13,14 +13,7 @@ services:
     env_file:
       - ./Redis/.env
     healthcheck:
-      test:
-        [
-          "CMD",
-          "redis-cli",
-          "-u",
-          "redis://${REDIS_USERNAME}:${REDIS_PASSWORD}@localhost:6379",
-          "ping",
-        ]
+      test: [ "CMD", "redis-cli", "-u", "redis://${REDIS_USERNAME}:${REDIS_PASSWORD}@localhost:6379", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,6 +43,8 @@ services:
     container_name: cvsentry-app
     environment:
       PYTHONPATH: /app/app
+      QDRANT_URL: http://qdrant:6333
+      DJANGO_URL: http://host.docker.internal:8000
     restart: unless-stopped
     env_file:
       - ./app/.env
@@ -65,9 +60,20 @@ services:
     networks:
       - cvsentry-net
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: cvsentry-qdrant
+    restart: unless-stopped
+    ports:
+      - "6335:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_local_data:/qdrant/storage
+    networks:
+      - cvsentry-net
 volumes:
   redis_data:
-
+  qdrant_local_data:
 networks:
   cvsentry-net:
     name: cvsentry-net

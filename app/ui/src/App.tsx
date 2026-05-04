@@ -4,6 +4,7 @@ import Home from "./routes/Home"
 import CameraStreams from "./routes/CameraStreams"
 import Login from "./screens/Login"
 import VerifyOTP from "./screens/VerifyOTP"
+import SyncStatusBar from "./components/SyncStatusBar"
 
 function ProtectedRoutes() {
   return (
@@ -33,7 +34,12 @@ function AppContent() {
     return <div className="min-h-screen bg-gray-900" />
   }
 
-  return isAuthenticated ? <ProtectedRoutes /> : <PublicRoutes />
+  return (
+    <>
+      {isAuthenticated ? <ProtectedRoutes /> : <PublicRoutes />}
+      {isAuthenticated && <SyncStatusBar />}
+    </>
+  )
 }
 
 function App() {
