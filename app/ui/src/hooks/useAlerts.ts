@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import authRequest from '../utils/authRequest';
+import request from '../utils/request';
 
 export interface Alert {
     id: number;
@@ -44,14 +44,14 @@ export function useAlerts(): UseAlertsResult {
             const params = sinceRef.current
                 ? `?since=${encodeURIComponent(sinceRef.current)}&limit=10`
                 : '?limit=10';
-            const data: Alert[] = await authRequest.get(`/alerts/${params}`);
+            const data: Alert[] = await request.get(`/api/auth/alerts${params}`);
 
             if (data && data.length > 0) {
                 sinceRef.current = data[0].timestamp;
 
                 if (initialLoad.current) {
                     initialLoad.current = false;
-                    return; // don't fire on first load
+                    return;
                 }
 
                 const newest = data[0];

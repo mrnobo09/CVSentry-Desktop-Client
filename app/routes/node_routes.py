@@ -2,10 +2,13 @@ import os
 import socket
 import asyncio
 import requests
+import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from dependencies.auth import verify_token
+from dependencies.keys import get_public_key
 from services.face_sync import sync_faces
+from dependencies.state import _node_state
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,15 +37,8 @@ def _get_local_ip() -> str:
 
 class RegisterPayload(BaseModel):
     label: str = ""
-    access_token: str  # The Django JWT token to authenticate with Django backend
-
-
-# In-memory node state
-_node_state = {
-    "node_id": None,
-    "access_token": None,
-    "local_ip": None,
-}
+    access_token: str
+    refresh_token: str = ""
 
 
 @router.post("/register")
@@ -54,12 +50,24 @@ async def register_node(payload: RegisterPayload):
     """
     token = payload.access_token
     _node_state["access_token"] = token
+    if payload.refresh_token:
+        _node_state["refresh_token"] = payload.refresh_token
+
+    # Extract user identity from the JWT for ownership verification
+    try:
+        token_payload = jwt.decode(
+            token, get_public_key(), algorithms=["RS256"], options={"verify_aud": False}
+        )
+        _node_state["user_id"] = token_payload.get("user_id")
+        _node_state["user_email"] = token_payload.get("email")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid access token — cannot extract user identity")
 
     local_ip = _get_local_ip()
     _node_state["local_ip"] = local_ip
     base_url = f"http://{local_ip}"
 
-    print(f"[node] 📡 Registering node with IP: {base_url}:{NODE_PORT}")
+    print(f"[node] 📡 Registering node with IP: {base_url}:{NODE_PORT} (user_id={_node_state.get('user_id')})")
 
     try:
         response = requests.post(

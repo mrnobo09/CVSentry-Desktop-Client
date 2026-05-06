@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, Loader2, ShieldCheck } from 'lucide-react';
-import authRequest from '../utils/authRequest';
+import request from '../utils/request';
 
 export default function Login() {
     const navigate = useNavigate();
@@ -15,7 +15,7 @@ export default function Login() {
         setError('');
         setIsLoading(true);
         try {
-            const data = await authRequest.post('/auth/login/', { email, password });
+            const data = await request.post('/api/auth/login', { email, password });
             if (data.otp_required) {
                 navigate('/verify-otp', { state: { email } });
             } else {

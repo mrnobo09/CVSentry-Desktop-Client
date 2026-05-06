@@ -3,7 +3,7 @@ from services.onvif_handler import discover_cameras
 from schemas.cameras import Cameras
 from services.analyzer import AnalyzeCameraStreams
 from services.rtmp_service import start_rtmp_broadcasting
-from dependencies.auth import verify_token
+from dependencies.auth import verify_token, verify_node_ownership
 from routes.node_routes import notify_cameras_active, re_register_node
 from pydantic import BaseModel
 import asyncio
@@ -14,7 +14,8 @@ active_rtmp_task = None
 
 @router.get("/list")
 async def list_cameras(payload=Depends(verify_token)):
-    """Endpoint to list discovered ONVIF cameras. Requires valid JWT."""
+    """Endpoint to list discovered ONVIF cameras. Requires valid JWT + node ownership."""
+    await verify_node_ownership(payload)
     cameras = discover_cameras()
     return cameras
 
@@ -33,6 +34,7 @@ async def start_camera_analysis(cameras: Cameras, payload=Depends(verify_token))
     Weapon detection starts automatically — it polls Redis for
     stream:*:weapon_group keys and self-activates.
     """
+    await verify_node_ownership(payload)
     global active_rtmp_task
     cameras_dict = cameras.root
     camera_ids = list(cameras_dict.keys())
@@ -66,6 +68,7 @@ class StopPayload(BaseModel):
 @router.post("/stop")
 async def stop_camera_analysis(payload: StopPayload, token=Depends(verify_token)):
     """Stops analysis for the provided cameras."""
+    await verify_node_ownership(token)
     global active_rtmp_task
     from services.analyzer import global_av_handler
 

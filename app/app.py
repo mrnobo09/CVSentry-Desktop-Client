@@ -5,10 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes.camera_routes import router as camera_routes
-from routes.node_routes import router as node_routes, send_heartbeat, mark_offline, _node_state
+from routes.node_routes import router as node_routes, send_heartbeat, mark_offline
+from dependencies.state import _node_state
 from routes.stream_proxy import router as stream_proxy
 from routes.webrtc_routes import router as webrtc_routes
+from routes.srs_hooks import router as srs_hooks
+from routes.auth_routes import router as auth_routes
 from services.face_sync import face_sync_loop, sync_state
+from dependencies.keys import preload_public_key
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,7 +38,8 @@ def _get_access_token():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: launch heartbeat + face sync background tasks
+    # Startup: fetch RS256 public key from cloud, then launch background tasks
+    preload_public_key()
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
     sync_task = asyncio.create_task(face_sync_loop(_get_access_token))
     yield
@@ -62,6 +67,8 @@ app.include_router(camera_routes, prefix="/cameras")
 app.include_router(node_routes, prefix="/node")
 app.include_router(stream_proxy)   # /stream/{camera_id}.flv
 app.include_router(webrtc_routes)  # /webrtc/{camera_id}/whep
+app.include_router(srs_hooks)       # /internal/srs/on_play, /internal/srs/on_publish
+app.include_router(auth_routes)      # /api/auth/login, /api/auth/verify-otp, etc.
 
 
 @app.get("/")

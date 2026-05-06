@@ -1,16 +1,26 @@
 import os
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from dependencies.auth import verify_token
+from dependencies.auth import verify_token, verify_node_ownership
+from dependencies.keys import get_public_key
+from dependencies.state import _node_state
 from dotenv import load_dotenv
 
 load_dotenv()
 
 SRS_API_PORT = os.getenv("SRS_API_PORT", "1985")
 SRS_HOST = os.getenv("SRS_HOST", "srs")
+SRS_API_USER = os.getenv("SRS_API_USERNAME", "cvsentry_srs")
+SRS_API_PASS = os.getenv("SRS_API_PASSWORD", "")
 SRS_HTTP_URL = f"http://{SRS_HOST}:{SRS_API_PORT}"
 
 router = APIRouter()
+
+
+def _srs_auth():
+    if SRS_API_PASS:
+        return httpx.BasicAuth(SRS_API_USER, SRS_API_PASS)
+    return None
 
 
 @router.post("/webrtc/{camera_id}/whep")
@@ -29,12 +39,16 @@ async def whep_offer(
     if not token:
         raise HTTPException(status_code=401, detail="Token missing in query parameters.")
     
-    from dependencies.auth import DJANGO_SECRET_KEY
     import jwt
     try:
-        jwt.decode(token, DJANGO_SECRET_KEY, algorithms=["HS256"], options={"verify_aud": False})
+        payload = jwt.decode(token, get_public_key(), algorithms=["RS256"], options={"verify_aud": False})
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+    node_user_id = _node_state.get("user_id")
+    token_user_id = payload.get("user_id")
+    if node_user_id and str(token_user_id) != str(node_user_id):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     sdp_offer = await request.body()
     if not sdp_offer:
@@ -56,6 +70,7 @@ async def whep_offer(
             srs_response = await client.post(
                 srs_whep_url,
                 json=payload,
+                auth=_srs_auth(),
             )
     except httpx.RequestError as exc:
         raise HTTPException(
@@ -106,7 +121,7 @@ async def whep_teardown(
     )
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.delete(srs_delete_url)
+            await client.delete(srs_delete_url, auth=_srs_auth())
     except Exception:
         pass  # Best-effort teardown
 

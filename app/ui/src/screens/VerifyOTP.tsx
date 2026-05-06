@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
-import authRequest, { setAccessToken, setRefreshToken } from '../utils/authRequest';
+import request, { setAccessToken, setRefreshToken } from '../utils/request';
 import { useAuth } from '../contexts/AuthContext';
-
-const FASTAPI_URL = import.meta.env.VITE_BACKEND_URL as string; // Desktop FastAPI
 
 export default function VerifyOTP() {
     const navigate = useNavigate();
@@ -26,27 +24,12 @@ export default function VerifyOTP() {
         setError('');
         setIsLoading(true);
         try {
-            // Step 1: Verify OTP with Django (Desktop endpoint — returns tokens in body, no cookie)
-            const data = await authRequest.post('/auth/desktop/verify-otp/', { email, otp });
+            const data = await request.post('/api/auth/verify-otp', { email, otp });
 
             if (data.access) {
-                // Step 2: Store tokens — access in memory + localStorage, refresh in localStorage
                 setAccessToken(data.access);
                 if (data.refresh) setRefreshToken(data.refresh);
 
-                // Step 3: Register this Desktop Client node in Django via local FastAPI
-                try {
-                    await fetch(`${FASTAPI_URL}/node/register`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ access_token: data.access }),
-                    });
-                } catch (nodeErr) {
-                    // Non-fatal — node registration failure shouldn't block login
-                    console.warn('Node registration failed:', nodeErr);
-                }
-
-                // Step 4: Update auth context → triggers re-route to Home
                 await checkAuth();
                 navigate('/', { replace: true });
             } else {

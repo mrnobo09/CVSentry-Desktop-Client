@@ -27,12 +27,12 @@ services:
     env_file:
       - ./simple_realtime_server/.env
     ports:
-      - "1935:1935"
-      - "1985:1985"
-      - "8080:8080"
       - "8000:8000/udp"
     volumes:
       - ./simple_realtime_server/srs.conf:/usr/local/srs/conf/srs.conf:ro
+    command: >
+      sh -c "sed \"s/__SRS_API_PASSWORD__/$${SRS_API_PASSWORD}/g\" /usr/local/srs/conf/srs.conf > /tmp/srs_runtime.conf
+      && exec ./objs/srs -c /tmp/srs_runtime.conf"
     networks:
       - cvsentry-net
 
@@ -45,6 +45,8 @@ services:
       PYTHONPATH: /app/app
       QDRANT_URL: http://qdrant:6333
       DJANGO_URL: http://host.docker.internal:8000
+      SRS_API_USERNAME: ${SRS_API_USERNAME:-cvsentry_srs}
+      SRS_API_PASSWORD: ${SRS_API_PASSWORD:-}
     restart: unless-stopped
     env_file:
       - ./app/.env
