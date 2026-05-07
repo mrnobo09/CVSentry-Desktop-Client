@@ -3,7 +3,7 @@ import math
 import torch
 
 
-MODEL_PATH = "weights/weapon/best.onnx"
+MODEL_PATH = "weights/weapon/recent_best.onnx"
 MODEL_PATH_OPENVINO = "weights/weapon/best_2_openvino_model"
 
 # Load Models
