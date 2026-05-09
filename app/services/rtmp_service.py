@@ -4,6 +4,7 @@ from typing import List, Dict
 from utils.redis_manager import redis_manager as rdb
 from services.frame_aggregator import frame_aggregator
 from utils.rtmp_streamer import RTMPStreamer
+from services.threat_manager import threat_manager
 from routes.node_routes import send_threat_alert
 from utils.latency_tracker import pipeline_tracker
 
@@ -47,33 +48,19 @@ async def start_rtmp_broadcasting(camera_ids: List[str]):
                 n = frames_sent[target_cam]
 
                 if getattr(data, 'get', None):
-                    if data.get('has_combined_threat'):
-                        identities = data.get('face_identities', [])
-                        print(
-                            f"[app/{target_cam}] 🚨🔍 COMBINED THREAT — dispatching alert "
-                            f"| frame={data.get('frame_id')} | identities={identities}"
+                    # Feed metadata into ThreatManager for 30s sliding window deduplication
+                    asyncio.create_task(
+                        threat_manager.process_frame(
+                            camera_id=target_cam,
+                            frame_id=data.get('frame_id', -1),
+                            is_aiming=data.get('is_aiming', False),
+                            has_weapon=data.get('has_weapon', False),
+                            number_of_guns=data.get('number_of_guns', 0),
+                            face_identities=data.get('face_identities', [])
                         )
-                        asyncio.create_task(
-                            send_threat_alert(target_cam, data.get('frame_id'), identities, "COMBINED_THREAT")
-                        )
-                    elif data.get('has_recognition'):
-                        identities = data.get('face_identities', [])
-                        print(
-                            f"[app/{target_cam}] 🔍 FACE RECOGNIZED — dispatching alert "
-                            f"| frame={data.get('frame_id')} | identities={identities}"
-                        )
-                        asyncio.create_task(
-                            send_threat_alert(target_cam, data.get('frame_id'), identities, "FACE_RECOGNIZED")
-                        )
-                    elif data.get('has_threat'):
-                        print(
-                            f"[app/{target_cam}] 🚨 WEAPON DETECTED — dispatching alert "
-                            f"(frame_id={data.get('frame_id')}, detections={data.get('detections_count', 0)})"
-                        )
-                        asyncio.create_task(
-                            send_threat_alert(target_cam, data.get('frame_id'), [], "WEAPON_DETECTED")
-                        )
-                    elif n % LOG_EVERY_N_FRAMES == 0:
+                    )
+
+                    if n % LOG_EVERY_N_FRAMES == 0:
                         print(
                             f"[app/{target_cam}] 📺 {n} frames sent to SRS "
                             f"(frame_id={data.get('frame_id')}, size={len(frame_bytes)} bytes)"

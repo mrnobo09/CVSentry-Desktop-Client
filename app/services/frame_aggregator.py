@@ -2,19 +2,11 @@ import asyncio
 import orjson
 import heapq
 import time
-from typing import List, Dict, Any
+from typing import List, Dict
 from utils.frame_cache import frame_cache
-from utils.draw_utils import draw_detections
-from concurrent.futures import ThreadPoolExecutor
-
-THREAD_POOL = ThreadPoolExecutor(max_workers=8)
 
 
 def _check_combined_threat(weapon_dets: list, face_dets: list) -> bool:
-    """
-    Returns True when a RECOGNIZED face is sufficiently contained
-    within a person who has_weapon=True.
-    """
     armed_boxes = [
         d["box"] for d in weapon_dets
         if d.get("class_name") == "person_pose" and d.get("has_weapon")
@@ -24,25 +16,19 @@ def _check_combined_threat(weapon_dets: list, face_dets: list) -> bool:
         for d in face_dets
         if d.get("recognized") and d.get("box")
     ]
-
     if not armed_boxes or not recognized_face_boxes:
         return False
-
     for armed_box in armed_boxes:
         ax1, ay1, ax2, ay2 = armed_box
         for face_box, _ in recognized_face_boxes:
             fx1, fy1, fx2, fy2 = face_box
-            
             inter_x1 = max(ax1, fx1)
             inter_y1 = max(ay1, fy1)
             inter_x2 = min(ax2, fx2)
             inter_y2 = min(ay2, fy2)
-            
             if inter_x2 > inter_x1 and inter_y2 > inter_y1:
                 inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
                 face_area = (fx2 - fx1) * (fy2 - fy1)
-                
-                # Require 80% of face box to be inside person box AND face vertically in upper half
                 if face_area > 0 and (inter_area / face_area) > 0.8:
                     person_mid_y = ay1 + (ay2 - ay1) / 2
                     if fy1 < person_mid_y:
@@ -51,7 +37,6 @@ def _check_combined_threat(weapon_dets: list, face_dets: list) -> bool:
 
 
 def _get_recognized_identities(face_dets: list) -> list:
-    """Returns all recognized identity names from face detections."""
     return [
         d.get("identity")
         for d in face_dets
@@ -59,56 +44,12 @@ def _get_recognized_identities(face_dets: list) -> list:
     ]
 
 
-def _build_combined_threat_detections(weapon_dets: list, face_dets: list) -> list:
-    """
-    Injects COMBINED_THREAT entries for the draw layer when a recognized
-    face overlaps with an armed person.
-    """
-    extras = []
-    armed_people = [
-        d for d in weapon_dets
-        if d.get("class_name") == "person_pose" and d.get("has_weapon")
-    ]
-    recognized_faces = [
-        d for d in face_dets
-        if d.get("recognized") and d.get("box")
-    ]
-
-    for person in armed_people:
-        ax1, ay1, ax2, ay2 = person["box"]
-        for face in recognized_faces:
-            fx1, fy1, fx2, fy2 = face["box"]
-            inter_x1 = max(ax1, fx1)
-            inter_y1 = max(ay1, fy1)
-            inter_x2 = min(ax2, fx2)
-            inter_y2 = min(ay2, fy2)
-            
-            if inter_x2 > inter_x1 and inter_y2 > inter_y1:
-                inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
-                face_area = (fx2 - fx1) * (fy2 - fy1)
-                if face_area > 0 and (inter_area / face_area) > 0.8:
-                    person_mid_y = ay1 + (ay2 - ay1) / 2
-                    if fy1 < person_mid_y:
-                        extras.append({
-                            "class_name": "COMBINED_THREAT",
-                            "box": person["box"],
-                            "score": 1.0,
-                            "identity": face.get("identity"),
-                        })
-    return extras
-
-
 async def frame_aggregator(redis_manager, camera_ids: list):
-    """
-    Aggregates weapon + face detection results, merges detections strictly by frame_id,
-    draws annotations via ThreadPool, and yields frames for the RTMP broadcaster.
-    """
     streams = {
         **{f"weapon:{cam_id}": "$" for cam_id in camera_ids},
         **{f"face:{cam_id}":   "$" for cam_id in camera_ids},
     }
 
-    # Balanced Jitter Buffer for multi-worker sync (3 frames @ 10fps = ~300ms latency)
     BUFFER_SIZE = 3
     LOG_EVERY_N = 30
     frame_buffers: dict = {cam_id: [] for cam_id in camera_ids}
@@ -116,7 +57,6 @@ async def frame_aggregator(redis_manager, camera_ids: list):
     fps_stats = {cam_id: {"count": 0, "start_time": time.time()} for cam_id in camera_ids}
     FPS_REPORT_INTERVAL = 10
 
-    # Asynchronous temporal tracking for unlinked streams
     latest_face_dets: dict = {cam_id: [] for cam_id in camera_ids}
     pending_weapons: dict = {cam_id: {} for cam_id in camera_ids}
 
@@ -124,18 +64,16 @@ async def frame_aggregator(redis_manager, camera_ids: list):
     yielded_counts: dict = {cam_id: 0 for cam_id in camera_ids}
 
     print(f"[app/aggregator] 🟢 Started for cameras: {camera_ids} | buffer={BUFFER_SIZE}")
-    loop = asyncio.get_running_loop()
 
     while True:
         try:
             r = redis_manager.get_client()
             response = await r.xread(
                 streams=streams,
-                count=5,     # Process up to 5 events per stream per loop to catch up fast
-                block=20     # Lower block time (20ms) to check 80ms timeouts accurately
+                count=5,
+                block=20,
             )
 
-            # 1. Process new incoming messages
             if response:
                 for stream_name_bytes, messages in response:
                     stream_name = stream_name_bytes.decode("utf-8")
@@ -174,22 +112,19 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                             count_bytes  = fields.get(b"detections_count")
                             det_count    = int(count_bytes.decode("utf-8")) if count_bytes else 0
 
-                            # Add to pending wait queue with current timestamp
                             pending_weapons[camera_id][frame_id] = {
                                 "timestamp": time.time(),
                                 "detections": detections,
                                 "has_threat": has_threat,
                                 "det_count": det_count,
-                                "message_id": message_id.decode("utf-8")
+                                "message_id": message_id.decode("utf-8"),
                             }
 
                             if len(pending_weapons[camera_id]) > 50:
                                 min_k = min(pending_weapons[camera_id].keys())
                                 del pending_weapons[camera_id][min_k]
 
-            # 2. Check pending frames for matches or timeouts
-            now = time.time()
-            tasks_to_draw = []
+            tasks_to_process = []
 
             for camera_id in camera_ids:
                 f_ids = list(pending_weapons[camera_id].keys())
@@ -199,67 +134,68 @@ async def frame_aggregator(redis_manager, camera_ids: list):
 
                     raw_frame_bytes = frame_cache.get(camera_id, f_id)
                     if raw_frame_bytes is None:
-                        # Frame expired from in-memory pool
                         del pending_weapons[camera_id][f_id]
                         continue
 
-                    # Add to batch draw task
-                    tasks_to_draw.append({
+                    tasks_to_process.append({
                         "camera_id": camera_id,
                         "frame_id": f_id,
                         "w_data": w_data,
                         "face_dets": face_dets,
-                        "raw_frame_bytes": raw_frame_bytes
+                        "raw_frame_bytes": raw_frame_bytes,
                     })
-                    
+
                     del pending_weapons[camera_id][f_id]
 
-            # 3. Offload drawing in parallel
-            if tasks_to_draw:
-                async def process_draw_task(task_spec):
+            if tasks_to_process:
+                for task_spec in tasks_to_process:
                     c_id = task_spec["camera_id"]
                     f_id = task_spec["frame_id"]
                     w_d = task_spec["w_data"]
                     f_dets = task_spec["face_dets"]
                     raw_bytes = task_spec["raw_frame_bytes"]
                     w_dets = w_d["detections"]
-                    
+
                     has_rec = any(d.get("recognized") for d in f_dets)
                     has_comb = _check_combined_threat(w_dets, f_dets)
                     f_ids = _get_recognized_identities(f_dets)
-                    
-                    comb_dets = w_dets + f_dets
-                    if has_comb:
-                        comb_dets += _build_combined_threat_detections(w_dets, f_dets)
-                        
-                    if comb_dets:
-                        anno_bytes = await loop.run_in_executor(
-                            THREAD_POOL,
-                            draw_detections,
-                            raw_bytes,
-                            comb_dets
-                        )
-                    else:
-                        anno_bytes = raw_bytes
-                        
-                    return {
+
+                    weapon_objects = [
+                        d for d in w_dets
+                        if d.get("class_name") not in ["person_pose", "COMBINED_THREAT", "THREAT_AIMING"]
+                    ]
+                    number_of_guns = len(weapon_objects)
+                    is_aiming = any(
+                        d.get("is_aiming") for d in w_dets
+                        if d.get("class_name") == "person_pose"
+                    )
+                    has_weapon_flag = any(
+                        d.get("has_weapon") for d in w_dets
+                        if d.get("class_name") == "person_pose"
+                    )
+
+                    frame_data = {
                         "camera_id": c_id,
                         "message_id": w_d["message_id"],
                         "frame_id": f_id,
-                        "frame_bytes": anno_bytes,
-                        "detections": comb_dets,
-                        "detections_count": w_d["det_count"] + len(f_dets),
-                        "has_threat": w_d["has_threat"],
-                        "has_recognition": has_rec,
-                        "has_combined_threat": has_comb,
-                        "face_identities": f_ids,
+                        "jpeg_bytes": raw_bytes,
+                        "detections": {
+                            "weapon": w_dets,
+                            "face": f_dets,
+                            "combined_threat": has_comb,
+                        },
+                        "threat_meta": {
+                            "has_threat": w_d["has_threat"],
+                            "has_recognition": has_rec,
+                            "has_combined_threat": has_comb,
+                            "face_identities": f_ids,
+                            "number_of_guns": number_of_guns,
+                            "is_aiming": is_aiming,
+                            "has_weapon": has_weapon_flag,
+                            "severity": "severe" if is_aiming else "normal",
+                        },
                     }
 
-                # Executing drawing concurrently over the thread pool
-                drawn_results = await asyncio.gather(*(process_draw_task(t) for t in tasks_to_draw))
-
-                for frame_data in drawn_results:
-                    c_id = frame_data["camera_id"]
                     heapq.heappush(frame_buffers[c_id], (frame_data["frame_id"], frame_data))
 
                     if len(frame_buffers[c_id]) > BUFFER_SIZE:
@@ -268,17 +204,17 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                         yielded_counts[c_id] = yielded_counts.get(c_id, 0) + 1
                         yield_n = yielded_counts[c_id]
 
-                        if sorted_frame.get("has_combined_threat"):
-                            ids = sorted_frame.get("face_identities", [])
+                        tm = sorted_frame.get("threat_meta", {})
+                        if tm.get("has_combined_threat"):
+                            ids = tm.get("face_identities", [])
                             print(f"[app/{c_id}] 🚨🔍 COMBINED THREAT | frame={sorted_frame['frame_id']} | identities={ids}")
-                        elif sorted_frame.get("has_threat"):
-                            print(f"[app/{c_id}] 🚨 THREAT frame → SRS | frame_id={sorted_frame['frame_id']}")
+                        elif tm.get("has_threat"):
+                            print(f"[app/{c_id}] 🚨 THREAT frame | frame_id={sorted_frame['frame_id']}")
                         elif yield_n % LOG_EVERY_N == 0:
-                            print(f"[app/{c_id}] 🖼️  Yielded {yield_n} annotated frames to RTMP broadcaster")
+                            print(f"[app/{c_id}] 🖼️  Yielded {yield_n} frames to streamer")
 
                         yield sorted_frame
 
-                        # FPS Stats
                         stats = fps_stats[c_id]
                         stats["count"] += 1
                         if stats["count"] >= FPS_REPORT_INTERVAL:
@@ -288,8 +224,7 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                             stats["count"] = 0
                             stats["start_time"] = time.time()
 
-            # Small sleep purely to yield execution if completely idle
-            if not response and not tasks_to_draw:
+            if not response and not tasks_to_process:
                 await asyncio.sleep(0.001)
 
         except asyncio.CancelledError:

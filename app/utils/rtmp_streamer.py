@@ -18,13 +18,11 @@ class RTMPStreamer:
             f"-probesize 32 -analyzeduration 0 "
             f"-f image2pipe -vcodec mjpeg -i - "  
             
-            f"-c:v libx264 "
-            f"-preset ultrafast "
-            f"-tune zerolatency "
-            f"-x264-params 'bframes=0:force-cfr=1:no-mbtree=1:sync-lookahead=0:rc-lookahead=0:sliced-threads=1:threads=2' "
-            f"-pix_fmt yuv420p "
-            f"-bf 0 "
-            f"-flags +low_delay "
+            f"-c:v h264_nvenc "
+            f"-preset p1 "
+            f"-tune ull "
+            f"-zerolatency 1 "
+            f"-delay 0 "
             
             # ── RATE CONTROL: CBR with tighter buffer ──
             f"-b:v 300k -minrate 300k -maxrate 300k -bufsize 150k "

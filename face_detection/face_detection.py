@@ -4,6 +4,7 @@ import asyncio
 import numpy as np
 from utils.RedisManager import redis_manager
 from services import background_processor
+from services.analysis import face_app
 
 # -----------------------------------------------------------------------
 # Pattern face_detection watches for.
@@ -47,11 +48,11 @@ async def lifespan(app: FastAPI):
     print("--- 👤 Face Detection Service Starting ---")
 
     print("🔥 Warming up Face Detection models in memory...")
-    from services.background_processor import ANALYZER
     
     dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
     try:
-        ANALYZER.app.get(dummy_frame)
+        if face_app:
+            face_app.get(dummy_frame)
         print("✅ Face Detection models warmed up successfully.")
     except Exception as e:
         print(f"⚠️ Face Detection model warmup failed: {e}")
@@ -116,12 +117,12 @@ async def reload_faces():
     The local Qdrant is synced automatically by the orchestrator.
     This endpoint now returns the current Qdrant connection status.
     """
-    from services.background_processor import ANALYZER
-    connected = ANALYZER.qdrant is not None
+    from services.analysis import global_qdrant
+    connected = global_qdrant is not None
     count = 0
     if connected:
         try:
-            info = ANALYZER.qdrant.get_collection(collection_name="faces")
+            info = global_qdrant.get_collection(collection_name="faces")
             count = info.points_count
         except Exception:
             pass

@@ -20,47 +20,21 @@ services:
     networks:
       - cvsentry-net
 
-  srs:
-    image: ossrs/srs:5
-    container_name: cvsentry-srs
-    restart: unless-stopped
-    env_file:
-      - ./simple_realtime_server/.env
-    ports:
-      - "8000:8000/udp"
-    volumes:
-      - ./simple_realtime_server/srs.conf:/usr/local/srs/conf/srs.conf:ro
-    command: >
-      sh -c "sed \"s/__SRS_API_PASSWORD__/$${SRS_API_PASSWORD}/g\" /usr/local/srs/conf/srs.conf > /tmp/srs_runtime.conf
-      && exec ./objs/srs -c /tmp/srs_runtime.conf"
-    networks:
-      - cvsentry-net
-
   app:
     build:
       context: .
       dockerfile: app/Dockerfile
     container_name: cvsentry-app
+    network_mode: "host"
     environment:
       PYTHONPATH: /app/app
-      QDRANT_URL: http://qdrant:6333
-      DJANGO_URL: http://host.docker.internal:8000
-      SRS_API_USERNAME: ${SRS_API_USERNAME:-cvsentry_srs}
-      SRS_API_PASSWORD: ${SRS_API_PASSWORD:-}
+      QDRANT_URL: http://localhost:6335
+      DJANGO_URL: http://localhost:8000
+      CLOUD_SRS_WHIP_URL: http://localhost:1985/rtc/v1/publish/
+      NVIDIA_VISIBLE_DEVICES: all
     restart: unless-stopped
     env_file:
       - ./app/.env
-    ports:
-      - "8001:8001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      srs:
-        condition: service_started
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - cvsentry-net
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -73,9 +47,11 @@ services:
       - qdrant_local_data:/qdrant/storage
     networks:
       - cvsentry-net
+
 volumes:
   redis_data:
   qdrant_local_data:
+
 networks:
   cvsentry-net:
     name: cvsentry-net

@@ -10,8 +10,7 @@ from turbojpeg import TurboJPEG
 
 jpeg = TurboJPEG()
 
-ANALYZER = FaceAnalyzer(skip_frames=2)
-
+camera_analyzers: Dict[str, FaceAnalyzer] = {}
 active_monitors: Dict[str, dict] = {}
 CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
@@ -97,9 +96,13 @@ async def process_camera_task(camera_id: str, queue: asyncio.Queue):
             data_package = await queue.get()
             frame, frame_id, msg_id = data_package
 
+            analyzer = camera_analyzers.get(camera_id)
+            if not analyzer:
+                continue
+
             detections = await loop.run_in_executor(
                 CPU_EXECUTOR,
-                ANALYZER.analyze_frame,
+                analyzer.analyze_frame,
                 frame
             )
 
@@ -153,7 +156,8 @@ async def start_cameras(camera_ids: List[str]):
             continue
 
         print(f"[face] 🚀 Booting up monitor for: {cam}")
-        q = asyncio.Queue(maxsize=1)
+        camera_analyzers[cam] = FaceAnalyzer(skip_frames=2)
+        q = asyncio.Queue(maxsize=5)
         t1 = asyncio.create_task(fetch_frames_task(cam, q))
         t2 = asyncio.create_task(process_camera_task(cam, q))
         active_monitors[cam] = {"queue": q, "tasks": [t1, t2]}
@@ -167,6 +171,8 @@ async def stop_cameras(camera_ids: List[str]):
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if cam in camera_analyzers:
+            del camera_analyzers[cam]
         del active_monitors[cam]
 
 

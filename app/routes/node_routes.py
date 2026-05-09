@@ -16,6 +16,7 @@ load_dotenv()
 DJANGO_URL = os.getenv("DJANGO_URL", "http://localhost:8000")
 NODE_PORT = int(os.getenv("NODE_PORT", "8001"))
 NODE_SRS_PORT = int(os.getenv("NODE_SRS_PORT", "8080"))
+NODE_WEBRTC_PORT = int(os.getenv("NODE_WEBRTC_PORT", "8001"))
 
 router = APIRouter()
 
@@ -77,6 +78,7 @@ async def register_node(payload: RegisterPayload):
                 "base_url": base_url,
                 "port": NODE_PORT,
                 "srs_port": NODE_SRS_PORT,
+                "webrtc_port": NODE_WEBRTC_PORT,
             },
             headers={"Authorization": f"Bearer {token}"},
             timeout=5,
@@ -192,6 +194,7 @@ async def re_register_node(label: str = ""):
                 "base_url": base_url,
                 "port": NODE_PORT,
                 "srs_port": NODE_SRS_PORT,
+                "webrtc_port": NODE_WEBRTC_PORT,
             },
             headers={"Authorization": f"Bearer {token}"},
             timeout=5,
@@ -236,7 +239,7 @@ async def notify_cameras_active(camera_ids: list[str], reason: str = ""):
         print(f"[node] ❌ Failed to update cameras: {e}")
 
 
-async def send_threat_alert(camera_id: str, frame_id: int, identities: list, alert_type: str = "COMBINED_THREAT"):
+async def send_threat_alert(camera_id: str, frame_id: int, identities: list, alert_type: str = "COMBINED_THREAT", threat_id: str = None, severity: str = "normal", number_of_guns: int = 0):
     """
     POSTs a threat alert to Django.
 
@@ -256,6 +259,9 @@ async def send_threat_alert(camera_id: str, frame_id: int, identities: list, ale
         "alert_type": alert_type,
         "node_ip":    local_ip,
         "timestamp":  datetime.datetime.utcnow().isoformat() + "Z",
+        "threat_id":  threat_id,
+        "severity":   severity,
+        "number_of_guns": number_of_guns,
     }
 
     def _post():

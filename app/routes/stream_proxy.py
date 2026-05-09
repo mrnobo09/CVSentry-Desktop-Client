@@ -50,12 +50,15 @@ async def proxy_stream(
     srs_url = f"{SRS_BASE_URL}/{camera_id}.flv"
 
     async def stream_generator():
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("GET", srs_url) as response:
-                if response.status_code != 200:
-                    raise HTTPException(status_code=response.status_code, detail="SRS stream not available")
-                async for chunk in response.aiter_bytes(chunk_size=4096):
-                    yield chunk
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", srs_url) as response:
+                    if response.status_code != 200:
+                        raise HTTPException(status_code=response.status_code, detail="SRS stream not available")
+                    async for chunk in response.aiter_bytes(chunk_size=4096):
+                        yield chunk
+        except (httpx.RemoteProtocolError, httpx.ReadError):
+            pass
 
     return StreamingResponse(
         stream_generator(),

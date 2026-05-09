@@ -20,6 +20,32 @@ RECOGNITION_THRESHOLD = 0.45
 QDRANT_URL = os.getenv("QDRANT_URL", "http://cvsentry-qdrant:6333")
 COLLECTION_NAME = "faces"
 
+print("[face] 🚀 Loading InsightFace buffalo_s model...")
+try:
+    face_app = FaceAnalysis(
+        name="buffalo_s",
+        providers=["CUDAExecutionProvider", "OpenVINOExecutionProvider", "CPUExecutionProvider"]
+    )
+    face_app.prepare(ctx_id=0, det_size=(640, 640))
+    
+    # Determine the active executor used by the underlying ONNXSession
+    model_name = list(face_app.models.keys())[0]
+    providers = face_app.models[model_name].session.get_providers()
+    active_provider = providers[0] if providers else "UnknownProvider"
+    
+    if "CUDA" in active_provider:
+        print(f"[face] ✅ InsightFace model ready. Executor: CUDA")
+    elif "OpenVINO" in active_provider:
+        print(f"[face] ✅ InsightFace model ready. Executor: OpenVINO")
+    else:
+        print(f"[face] ✅ InsightFace model ready. Executor: CPU ({active_provider})")
+except Exception as e:
+    print(f"[face] ⚠️ InsightFace model init failed: {e}")
+    face_app = None
+
+# Global qdrant client for endpoints
+global_qdrant = None
+
 
 class FaceAnalyzer:
     """
@@ -38,29 +64,6 @@ class FaceAnalyzer:
         self.counter = 0
         self.last_detections = []
 
-        print("[face] 🚀 Loading InsightFace buffalo_s model...")
-        self.app = FaceAnalysis(
-            name="buffalo_s",
-            providers=["CUDAExecutionProvider", "OpenVINOExecutionProvider", "CPUExecutionProvider"]
-        )
-        self.app.prepare(ctx_id=0, det_size=(640, 640))
-        
-        # Determine the active executor used by the underlying ONNXSession
-        try:
-            model_name = list(self.app.models.keys())[0]
-            providers = self.app.models[model_name].session.get_providers()
-            active_provider = providers[0] if providers else "UnknownProvider"
-            
-            # Make the log friendly
-            if "CUDA" in active_provider:
-                print(f"[face] ✅ InsightFace model ready. Executor: CUDA")
-            elif "OpenVINO" in active_provider:
-                print(f"[face] ✅ InsightFace model ready. Executor: OpenVINO")
-            else:
-                print(f"[face] ✅ InsightFace model ready. Executor: CPU ({active_provider})")
-        except Exception:
-            print("[face] ✅ InsightFace model ready.")
-
         # Connect to local Qdrant
         self.qdrant = None
         self._connect_qdrant()
@@ -71,8 +74,10 @@ class FaceAnalyzer:
 
     def _connect_qdrant(self):
         """Connects to the local Qdrant instance."""
+        global global_qdrant
         try:
             self.qdrant = QdrantClient(url=QDRANT_URL)
+            global_qdrant = self.qdrant
             # Check if the collection exists
             try:
                 info = self.qdrant.get_collection(collection_name=COLLECTION_NAME)
@@ -82,9 +87,11 @@ class FaceAnalyzer:
                 print(f"[face] ⚠️ Qdrant collection '{COLLECTION_NAME}' not found. "
                       "Waiting for orchestrator sync to create it.")
                 self.qdrant = None
+                global_qdrant = None
         except Exception as e:
             print(f"[face] ⚠️ Could not connect to Qdrant at {QDRANT_URL}: {e}")
             self.qdrant = None
+            global_qdrant = None
 
     # ------------------------------------------------------------------
     # Recognition via Qdrant vector search
@@ -157,7 +164,7 @@ class FaceAnalyzer:
         self.counter = 0
 
         try:
-            faces = self.app.get(frame)
+            faces = face_app.get(frame) if face_app else []
         except Exception as e:
             print(f"[face] ❌ InsightFace inference error: {e}")
             return []
