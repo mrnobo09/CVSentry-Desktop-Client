@@ -142,9 +142,20 @@ export default function CameraFeed({ cam_id }: CameraFeedProps) {
                 const fastapiBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8001';
                 const token = localStorage.getItem('access_token') || '';
 
-                pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-                });
+                let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+                try {
+                    const iceResp = await fetch(
+                        `${fastapiBase}/config/ice-servers?token=${encodeURIComponent(token)}`,
+                    );
+                    if (iceResp.ok) {
+                        const iceConfig = await iceResp.json();
+                        if (iceConfig.iceServers && iceConfig.iceServers.length) {
+                            iceServers = iceConfig.iceServers;
+                        }
+                    }
+                } catch {}
+
+                pc = new RTCPeerConnection({ iceServers });
                 pcRef.current = pc;
 
                 pc.addTransceiver('video', { direction: 'recvonly' });

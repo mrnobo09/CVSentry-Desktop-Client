@@ -9,3 +9,5 @@ _node_state = {
     "user_id": None,
     "user_email": None,
 }
+
+_cached_ice_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]

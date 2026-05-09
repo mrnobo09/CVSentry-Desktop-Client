@@ -10,6 +10,8 @@ import av
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
+    RTCConfiguration,
+    RTCIceServer,
     VideoStreamTrack,
     RTCDataChannel,
     MediaStreamTrack,
@@ -17,6 +19,8 @@ from aiortc import (
 from aiortc.contrib.media import MediaRelay
 
 from turbojpeg import TurboJPEG
+
+from dependencies.state import _cached_ice_servers
 
 logger = logging.getLogger("webrtc_streamer")
 
@@ -26,6 +30,16 @@ CLOUD_SRS_WHIP_URL = os.getenv("CLOUD_SRS_WHIP_URL", "http://localhost:1985/rtc/
 CLOUD_DJANGO_URL = os.getenv("DJANGO_URL", "http://host.docker.internal:8000")
 SRS_API_USER = os.getenv("SRS_API_USERNAME", "cvsentry_srs")
 SRS_API_PASS = os.getenv("SRS_API_PASSWORD", "")
+
+
+def _build_rtc_config():
+    servers = []
+    for s in _cached_ice_servers:
+        if isinstance(s, dict):
+            servers.append(RTCIceServer(**s))
+        else:
+            servers.append(s)
+    return RTCConfiguration(iceServers=servers) if servers else None
 
 
 def detect_hw_encoder():
@@ -194,7 +208,9 @@ class WebrtcStreamer:
         relayed = self.relay.subscribe(self.video_track)
         self.relayed_track = relayed
 
-        pc = HardwareRTCPeerConnection()
+        pc = HardwareRTCPeerConnection(
+            configuration=_build_rtc_config()
+        )
         self.cloud_peer = pc
 
         pc.addTrack(relayed)
@@ -246,7 +262,9 @@ class WebrtcStreamer:
     async def handle_local_client_offer(self, offer_sdp: str) -> tuple[str, str]:
         relayed = self.relay.subscribe(self.video_track)
 
-        pc = HardwareRTCPeerConnection()
+        pc = HardwareRTCPeerConnection(
+            configuration=_build_rtc_config()
+        )
         session_id = f"{self.camera_id}_{len(self.local_peers)}_{int(time.time()*1000)}"
         self.local_peers[session_id] = pc
 
