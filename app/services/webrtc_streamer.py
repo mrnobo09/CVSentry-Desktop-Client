@@ -201,7 +201,14 @@ class WebrtcStreamer:
             except Exception:
                 self.local_data_channels.pop(session_id, None)
 
-    async def start_cloud_relay(self, srs_whip_url: str, srs_stream_url: str, jwt_token: str) -> bool:
+    async def start_cloud_relay(
+        self, 
+        srs_whip_url: str, 
+        srs_stream_url: str, 
+        jwt_token: str,
+        srs_user: Optional[str] = None,
+        srs_pass: Optional[str] = None
+    ) -> bool:
         if self.cloud_peer:
             return True
 
@@ -220,7 +227,11 @@ class WebrtcStreamer:
 
         try:
             import httpx
-            auth = httpx.BasicAuth(SRS_API_USER, SRS_API_PASS) if SRS_API_PASS else None
+            # Use dynamic credentials if provided, otherwise fallback to .env
+            user = srs_user or SRS_API_USER
+            password = srs_pass or SRS_API_PASS
+            
+            auth = httpx.BasicAuth(user, password) if password else None
             async with httpx.AsyncClient(timeout=15.0, auth=auth) as client:
                 sdp_payload = {
                     "api": srs_whip_url,
