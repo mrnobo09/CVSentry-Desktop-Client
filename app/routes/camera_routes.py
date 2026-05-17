@@ -36,6 +36,10 @@ async def start_camera_analysis(cameras: Cameras, payload=Depends(verify_token))
     print(f"🎥 Starting WebRTC streaming for {len(camera_ids)} cameras...")
     if active_stream_task and not active_stream_task.done():
         active_stream_task.cancel()
+        try:
+            await active_stream_task
+        except asyncio.CancelledError:
+            pass
     active_stream_task = asyncio.create_task(start_streaming(camera_ids))
 
     return {

@@ -161,6 +161,7 @@ class HardwareRTCPeerConnection(RTCPeerConnection):
                     "delay": 0,
                     "rc": "cbr",
                     "b": "500k",
+                    "profile": "baseline",
                 }
                 return codec
             return await orig_create_encoder(codec_params)
@@ -232,16 +233,19 @@ class WebrtcStreamer:
             password = srs_pass or SRS_API_PASS
             
             auth = httpx.BasicAuth(user, password) if password else None
+            import urllib.parse
+            encoded_token = urllib.parse.quote(jwt_token)
+            # Inject token into the streamurl so it persists through SRS hooks
+            srs_stream_url_with_token = f"{srs_stream_url}?token={encoded_token}"
+            
             async with httpx.AsyncClient(timeout=15.0, auth=auth) as client:
                 sdp_payload = {
                     "api": srs_whip_url,
-                    "streamurl": srs_stream_url,
+                    "streamurl": srs_stream_url_with_token,
                     "clientip": None,
                     "sdp": pc.localDescription.sdp,
                 }
                 headers = {}
-                if jwt_token:
-                    headers["Authorization"] = f"Bearer {jwt_token}"
 
                 resp = await client.post(
                     srs_whip_url,

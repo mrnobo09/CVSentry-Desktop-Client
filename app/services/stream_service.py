@@ -61,11 +61,15 @@ async def start_streaming(camera_ids: list):
 
     token = _node_state.get("access_token")
 
+    # 1. Initialize all streamers and add to active dict immediately 
+    # to avoid 503s during slow cloud registration/relay startup.
     for cam_id in camera_ids:
         ws = WebrtcStreamer(cam_id)
         streamers[cam_id] = ws
         _active_streams[cam_id] = ws
 
+    for cam_id in camera_ids:
+        ws = streamers[cam_id]
         reg_data = await register_stream_on_cloud(cam_id)
         
         # Initialize default credentials
@@ -79,20 +83,15 @@ async def start_streaming(camera_ids: list):
             # Dynamically use what Django gave us
             whip_url = reg_data.get("whip_url") or whip_url
             whip_token = reg_data.get("whip_token")
-            if whip_token:
-                # Append token as query parameter for SRS callback
-                if "?" in whip_url:
-                    whip_url = f"{whip_url}&token={whip_token}"
-                else:
-                    whip_url = f"{whip_url}?token={whip_token}"
             
             srs_user = reg_data.get("srs_api_user")
             srs_pass = reg_data.get("srs_api_pass")
         else:
             srs_stream_id = f"{_node_state.get('user_id')}_{_node_state.get('node_id')}_{cam_id}"
             srs_stream_url = f"webrtc://srs/live/{srs_stream_id}"
+            whip_token = None
 
-        await ws.start_cloud_relay(whip_url, srs_stream_url, token, srs_user=srs_user, srs_pass=srs_pass)
+        await ws.start_cloud_relay(whip_url, srs_stream_url, whip_token or token, srs_user=srs_user, srs_pass=srs_pass)
 
         dispatcher = metadata_dispatcher_manager.get_or_create(cam_id, srs_stream_id=srs_stream_id)
         dispatchers[cam_id] = dispatcher
@@ -149,8 +148,10 @@ async def start_streaming(camera_ids: list):
     finally:
         for cam_id, ws in streamers.items():
             await ws.stop()
-        _active_streams.clear()
+            # Only remove what we added to avoid clearing new tasks' state
+            _active_streams.pop(cam_id, None)
         print("[stream] All WebRTC streamers stopped.")
+
 
 
 async def stop_streaming(camera_ids: list):

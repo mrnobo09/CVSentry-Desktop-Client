@@ -29,8 +29,6 @@ services:
     environment:
       PYTHONPATH: /app/app
       QDRANT_URL: http://localhost:6335
-      DJANGO_URL: http://localhost:8000
-      CLOUD_SRS_WHIP_URL: http://localhost:1985/rtc/v1/publish/
       NVIDIA_VISIBLE_DEVICES: all
     restart: unless-stopped
     env_file:

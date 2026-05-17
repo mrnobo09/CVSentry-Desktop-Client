@@ -1,8 +1,7 @@
 import time
-import time
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from dependencies.auth import verify_token, verify_node_ownership
+from dependencies.auth import verify_token
 from dependencies.keys import get_public_key
 from dependencies.state import _node_state
 
