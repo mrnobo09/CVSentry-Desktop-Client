@@ -1,162 +1,178 @@
-````md
-# 👁️ CVSentry Desktop Client
-
-**Distributed On-Premise CCTV AI Processing System**
-
-The CVSentry Desktop Client is a scalable, local surveillance solution that leverages a microservices architecture. It orchestrates multiple AI models (Object, Face, and Action detection) using Redis as a high-throughput message broker.
-
-All processing occurs locally on-premise, ensuring data privacy and low latency. The system is designed for horizontal scaling—simply add more workers to increase inference throughput.
+<div align="center">
+  <img src="./Images/CVSentryLogo.png" alt="CVSentry Logo" width="150"/>
+  <h1>CVSentry Desktop Client</h1>
+  
+  <strong>Distributed, highly-scalable on-premise orchestration for edge surveillance processing.</strong>
+</div>
 
 ---
 
-## 🚀 Key Features
+## Table of Contents
 
-- **Distributed Architecture:** Microservices run independently and communicate via Redis.
-- **Horizontal Scaling:** Add more worker processes to handle more camera streams without code changes.
-- **Real-time Aggregation:** The main backend aggregates inference results from multiple services and streams them to the UI via WebSockets.
-- **Modern Stack:** Python (FastAPI/Uvicorn), Node.js (React/Vite), and Redis.
-
----
-
-## 🧠 Architecture & Data Flow
-
-The system operates on a Pub/Sub & Worker pattern:
-
-1. **Ingestion:** The Main App captures frames from camera sources.
-2. **Distribution:** Frames are published to specific Redis channels/queues.
-3. **Inference:** Independent Microservices (Weapon, Face, Action) pull frames from Redis, perform preprocessing and inference, and push the results back to Redis.
-4. **Aggregation:** The Main App picks up the processed results, aggregates them, and broadcasts the final data to the React UI.
+- [Deep Dive: Architecture & Scalability](#deep-dive-architecture--scalability)
+- [Project Architecture](#project-architecture)
+- [System Requirements](#system-requirements)
+- [Environment Configuration](#environment-configuration)
+- [Setup Instructions (Docker)](#setup-instructions-docker)
+- [Manual Worker Setup (Advanced LAN Scaling)](#manual-worker-setup-advanced-lan-scaling)
+- [Cloud System Reference](#cloud-system-reference)
+- [License](#license)
 
 ---
 
-## ⚙️ Prerequisites
+## Deep Dive: Architecture & Scalability
 
-- Redis Server (Must be running locally)
-- Python 3.9+
-- Node.js 18+
-- Virtual Environment Tool (venv, conda, or poetry)
+The magic of the CVSentry Desktop Client lies in its completely decoupled, distributed microservices architecture based on a **Pub/Sub Broker pattern**. 
 
----
+1. **The Orchestrator (`app/`)**: Captures raw RTSP video streams from local cameras, encodes them to JPEGs, and publishes them to a central Redis stream. It never blocks on AI processing.
+2. **The Workers (`weapon_detection/`, `face_detection/`)**: These are independent worker processes. They continuously listen to the Redis streams, pull frames, run their respective AI inference models (YOLO / InsightFace), and publish the structured JSON results back to Redis.
+3. **Aggregation & Streaming**: The orchestrator matches the inference metadata back to the raw video frame and streams both the WebRTC video (via aiortc) and metadata (via WebRTC DataChannels) directly to local dashboards or the Cloud relay.
 
-## 📦 Installation
+### Horizontal LAN Scaling
+**This is the system's most powerful feature.** Because the workers only communicate via Redis, they do not need to run on the same physical machine as the main orchestrator. 
 
-### 1. Setup Python Environment
+You can add distributed local workers on any hardware across the same Local Area Network (LAN). If you want to add more cameras, simply utilize redundant hardware (old laptops, secondary servers, Jetson Nanos) on the same network. By pointing their `.env` Redis configuration to the main PC hosting the orchestrator, they will instantly begin consuming frames and distributing the inference workload. This massively boosts inference throughput and system performance without touching the core code.
 
-Create a virtual environment and install the backend dependencies.
+## Project Architecture
 
-```bash
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-````
-
-### 2. Setup Frontend Environment
-
-Install the React UI dependencies.
-
-```bash
-cd app/ui
-npm install
-```
-
----
-
-## 🏃‍♂️ Running the Services
-
-You will need to run the following services in separate terminal instances.
-
-### 1. Start Redis
-
-Ensure your local Redis server is running.
-
-```bash
-redis-server
-```
-
-### 2. Run the Main App (Orchestrator)
-
-This service manages camera streams, aggregates results, and handles WebSocket connections.
-
-```bash
-cd app
-uvicorn app:app --host 0.0.0.0 --port 4100
-```
-
-### 3. Run the Microservices
-
-You can run as many instances of these as your hardware allows.
-
-**⚔️ Weapon Detection**
-
-```bash
-uvicorn weapon_detection:app --host 0.0.0.0 --port 8001
-```
-
-**👤 Face Detection**
-
-```bash
-uvicorn face_detection:app --host 0.0.0.0 --port 8002
-```
-
-**🏃 Action/Posture Detection**
-
-```bash
-uvicorn action_detection:app --host 0.0.0.0 --port 8003
-```
-
-### 4. Run the User Interface
-
-Launch the React dashboard.
-
-```bash
-cd app/ui
-npm run dev
-```
-
----
-
-## 📂 Project Structure
-
-```
+```text
 CVSentry-Desktop-Client/
-├── app/                  # Main Backend Orchestrator
-│   ├── ui/               # React + Vite Frontend Dashboard
-│   ├── main.py           # Entry point for aggregation & routing
-│   └── ...
-├── weapon_detection/     # Microservice: YOLO object/weapon detection
-├── face_detection/       # Microservice: Face recognition & identification
-├── action_detection/     # Microservice: Pose estimation & behavior analysis
-├── requirements.txt      # Python dependencies
-└── README.md
+├── app/                        # Main Orchestrator (FastAPI) & Frontend UI
+│   ├── .env                    # Main application environment variables
+│   ├── ui/                     # Local React/Vite Dashboard
+│   └── app.py                  # Entrypoint for WebRTC, RTSP, and Redis coordination
+│
+├── face_detection/             # InsightFace Face Detection Microservice
+│   ├── .env                    # Worker environment config
+│   └── face_detection.py       # FastAPI worker entrypoint
+│
+├── weapon_detection/           # YOLO Weapon and Pose Detection Microservice
+│   ├── .env                    # Worker environment config
+│   └── weapon_detection.py     # FastAPI worker entrypoint
+│
+└── docker-compose.yml          # Redis, orchestrator app, and Qdrant database
 ```
 
----
+## System Requirements
 
-## 🛠️ Roadmap & Status
+This system performs best on Linux distributions (e.g., **Arch Linux**, **Debian/Ubuntu-based systems**). For Windows users, it is highly recommended to run this within **WSL 2** (Windows Subsystem for Linux).
 
-| Feature               | Status    | Notes                                           |
-| --------------------- | --------- | ----------------------------------------------- |
-| Core Inference Engine | ✅ Done    | Weapon, Face, and Action detection operational. |
-| Redis Worker System   | ✅ Done    | Distributed frame processing implemented.       |
-| UI Dashboard          | ✅ Done    | Live streaming and result visualization.        |
-| Authentication        | ⏳ Pending | User login and secure access control.           |
-| Alert Module          | ⏳ Pending | Logic for triggering system-wide alerts.        |
-| Auto-Scaling          | ⏳ Pending | Automated worker launcher scripts.              |
+### System Dependencies
+To ensure ultra-fast frame decoding and video ingestion, you must install the following system-level dependencies before running the application:
 
----
-
-## 📄 License
-
-Distributed under the MIT License.
-
----
-
-## 📞 Support
-
-For support, please open an issue or pull request on the GitHub repository.
-
+**Debian/Ubuntu (apt):**
+```bash
+sudo apt update
+sudo apt install build-essential ffmpeg libturbojpeg0-dev
 ```
+
+**Arch Linux (pacman):**
+```bash
+sudo pacman -S base-devel ffmpeg libjpeg-turbo
 ```
+
+## Environment Configuration
+
+You must configure multiple `.env` files across the different services. 
+
+### 1. `Redis/.env` & `users.acl`
+Before starting the infrastructure, the Redis instance requires its own configuration for secure authentication. 
+1. Navigate to the `Redis/` directory.
+2. Configure your `Redis/.env` file (e.g., `REDIS_PASSWORD=...`).
+3. Set up the `users.acl` file to match the credentials used by the orchestrator and workers.
+
+### 2. `app/.env` (Main Orchestrator)
+```env
+DJANGO_URL=http://localhost:8000
+NODE_PORT=8001
+NODE_WEBRTC_PORT=8001
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_USERNAME=cvsentry
+REDIS_PASSWORD=
+QDRANT_URL=http://localhost:6335
+SRS_API_USERNAME=cvsentry_srs
+SRS_API_PASSWORD=
+```
+
+### 3. `weapon_detection/.env` (Worker)
+```env
+REDIS_HOST=redis  # Change to the main PC's LAN IP if running on a separate machine
+REDIS_PORT=6379
+REDIS_USERNAME=cvsentry
+REDIS_PASSWORD=
+WEAPON_PORT=8002
+COMPOSE_PROFILES=cuda # cuda | cpu | openvino
+```
+
+### 4. `face_detection/.env` (Worker)
+```env
+REDIS_HOST=redis  # Change to the main PC's LAN IP if running on a separate machine
+REDIS_PORT=6379
+REDIS_USERNAME=cvsentry
+REDIS_PASSWORD=
+FACE_PORT=8003
+QDRANT_URL=http://qdrant:6333 # Change to main PC's LAN IP if separate
+COMPOSE_PROFILES=cuda # cuda | cpu | openvino
+```
+
+## Setup Instructions (Docker)
+
+To run the main orchestrator (which spins up the `app` server, Redis, and Qdrant all at once):
+
+1. Open your terminal in the root directory of the client repository:
+   ```bash
+   # Run in: CVSentry-Desktop-Client/ (root directory)
+   docker compose up --build
+   ```
+   This single command will:
+   - Build and start the FastAPI Orchestrator application (with host networking enabled).
+   - Spin up the secure Redis container with the mapped configuration and ACLs.
+   - Initialize the Qdrant vector database.
+
+2. Start the Local Dashboard UI:
+   Navigate to the UI folder and start the React/Vite development server:
+   ```bash
+   # Run in: CVSentry-Desktop-Client/app/ui/
+   cd app/ui
+   npm install
+   npm run dev
+   ```
+
+## Manual Worker Setup (Advanced LAN Scaling)
+
+If the provided Dockerfiles do not work for your hardware, or you want to easily scale by adding workers on different physical machines in your LAN, you can run the workers directly in a Python virtual environment.
+
+1. Install **Python 3.11.2** (strictly recommended) and the required system dependencies (`ffmpeg`, `libturbojpeg0-dev`) on the target machine.
+2. Clone the repository on the target machine.
+3. Update the `.env` file in the worker directory (e.g., `weapon_detection/.env`), ensuring `REDIS_HOST` points to the LAN IP address of the main orchestrator machine.
+4. Create your virtual environment and run the worker:
+
+**Weapon Detection Worker:**
+```bash
+# Run in: CVSentry-Desktop-Client/weapon_detection/
+cd weapon_detection
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn weapon_detection:app --host 0.0.0.0 --port 8002
+```
+
+**Face Detection Worker:**
+```bash
+# Run in: CVSentry-Desktop-Client/face_detection/
+cd face_detection
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn face_detection:app --host 0.0.0.0 --port 8003
+```
+The workers will automatically discover the Redis streams over the network and begin processing workloads instantly.
+
+## Cloud System Reference
+
+This edge client integrates closely with the central cloud infrastructure. For the cloud repository that handles global state, WebRTC relaying, and historical threat recordings, see [CVSentry](https://github.com/mrnobo09/CVSentry).
+
+## License
+
+This project is open-source. Anyone is free to self-host, customize, and use it.
