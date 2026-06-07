@@ -46,10 +46,11 @@ def _get_recognized_identities(face_dets: list) -> list:
 
 async def frame_aggregator(redis_manager, camera_ids: list):
     streams = {
-        **{f"weapon:{cam_id}": "$" for cam_id in camera_ids},
-        **{f"face:{cam_id}":   "$" for cam_id in camera_ids},
+        **{f"weapon:{cam_id}": "0-0" for cam_id in camera_ids},
+        **{f"face:{cam_id}":   "0-0" for cam_id in camera_ids},
     }
 
+    # Set buffer size to 0 to eliminate 300ms of artificial latency. Frames arrive ordered.
     BUFFER_SIZE = 3
     LOG_EVERY_N = 30
     frame_buffers: dict = {cam_id: [] for cam_id in camera_ids}
@@ -70,7 +71,7 @@ async def frame_aggregator(redis_manager, camera_ids: list):
             r = redis_manager.get_client()
             response = await r.xread(
                 streams=streams,
-                count=5,
+                count=1,
                 block=20,
             )
 
@@ -225,7 +226,7 @@ async def frame_aggregator(redis_manager, camera_ids: list):
                             stats["start_time"] = time.time()
 
             if not response and not tasks_to_process:
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             print("[app/aggregator] Aggregator task cancelled.")

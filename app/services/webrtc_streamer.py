@@ -63,15 +63,16 @@ class PipelineVideoTrack(VideoStreamTrack):
     def __init__(self, camera_id: str):
         super().__init__()
         self.camera_id = camera_id
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=5)
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=2)
         self._frame_count = 0
+        self._first_pts = None
 
     async def recv(self) -> av.VideoFrame:
         frame_data = await self._queue.get()
         jpeg_bytes = frame_data["jpeg_bytes"]
 
         try:
-            img_array = _jpeg.decode(jpeg_bytes)
+            img_array = await asyncio.to_thread(_jpeg.decode, jpeg_bytes)
         except Exception:
             img_array = None
 
@@ -86,8 +87,12 @@ class PipelineVideoTrack(VideoStreamTrack):
             raise asyncio.QueueEmpty()
 
         frame = av.VideoFrame.from_ndarray(img_array, format="bgr24")
-        # Use 10 FPS as a reasonable default for PTS increments at 90kHz timebase
-        frame.pts = self._frame_count * 9000
+        # Use absolute frame_number to guarantee flawless relative pacing regardless of drops
+        raw_pts = frame_data["frame_number"] * 6000
+        if self._first_pts is None:
+            self._first_pts = raw_pts
+            
+        frame.pts = raw_pts - self._first_pts
         frame.time_base = fractions.Fraction(1, 90000)
 
         self._frame_count += 1

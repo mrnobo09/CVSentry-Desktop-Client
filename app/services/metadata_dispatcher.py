@@ -1,6 +1,6 @@
 import asyncio
 import time
-import requests
+import httpx
 import os
 from dependencies.state import _node_state
 
@@ -55,16 +55,13 @@ class MetadataDispatcher:
         }
 
         try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: requests.post(
+            async with httpx.AsyncClient() as client:
+                await client.post(
                     f"{DJANGO_URL}/api/v1/streams/metadata/batch/",
                     json=payload,
                     headers={"Authorization": f"Bearer {token}"},
-                    timeout=5,
-                ),
-            )
+                    timeout=5.0,
+                )
         except Exception as e:
             print(f"[metadata/{self.camera_id}] ❌ Batch dispatch failed: {e}")
 

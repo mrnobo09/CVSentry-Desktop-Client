@@ -6,12 +6,14 @@ import io
 from typing import Dict, Optional
 from av.video.reformatter import VideoReformatter
 from turbojpeg import TurboJPEG
+import time
 
 jpeg = TurboJPEG()
 
 
 # Parameters to tune performance
-FRAME_SKIP = 3          # Keep 1 in every N frames  (higher = fewer frames, less CPU/Redis load)
+TARGET_FPS = 15         # Desired uniform output framerate for all cameras
+MIN_FRAME_INTERVAL = 1.0 / TARGET_FPS
 JPEG_QUALITY = 80       # JPEG encode quality (50-75 is a good range)
 INFER_RESOLUTION = 640  # Long-edge cap before pushing to Redis (matches YOLO training size)
 
@@ -78,7 +80,7 @@ class AVHandler:
 
         print(f"Decode loop started for {camera_id}...")
 
-        frame_counter = 0
+        last_frame_time = 0.0
 
         try:
             for packet in container.demux(video=0):
@@ -89,11 +91,13 @@ class AVHandler:
                     continue
 
                 for frame in packet.decode():
-                    frame_counter += 1
-
-                    # Frame Skipping
-                    if frame_counter % FRAME_SKIP != 0:
+                    # Time-Based Frame Skipping using absolute arrival time
+                    current_time = time.time()
+                    
+                    if current_time - last_frame_time < MIN_FRAME_INTERVAL:
                         continue  
+                    
+                    last_frame_time = current_time
 
                     # Downscale to 640x480 and convert to BGR24 using PyAV Reformatter
                     if not hasattr(self, 'reformatters'):

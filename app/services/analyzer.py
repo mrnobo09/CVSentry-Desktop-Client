@@ -54,7 +54,7 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
                         f"(latest frame_id={frame_id}, size={len(frame)} bytes)"
                     )
 
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0.01)
 
     except asyncio.CancelledError:
         print(f"[app/{camera_id}] 🛑 CameraWorker task cancelled")
