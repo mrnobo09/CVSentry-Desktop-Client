@@ -43,8 +43,9 @@ async def CameraWorker(camera_id: str, rtsp_url: str, avhandler: AVHandler):
                 if not first_frame_notified:
                     first_frame_notified = True
                     print(f"[app/{camera_id}] 🖼️  First frame received — notifying Django node is live")
+                    active_cams = [cid for cid, is_running in avhandler.running.items() if is_running]
                     asyncio.create_task(
-                        notify_cameras_active([camera_id], reason="first frame live")
+                        notify_cameras_active(active_cams, reason="first frame live")
                     )
 
                 if frames_pushed % LOG_EVERY_N_FRAMES == 0:
